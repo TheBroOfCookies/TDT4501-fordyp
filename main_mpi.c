@@ -100,9 +100,9 @@ main ( int argc, char **argv )
         case 3:   source_type=F_DIP; break;
     }
 
-    Nx = tNx/size;   //simple x decomposition
+    Nx = tNx;   //simple x decomposition
     Ny = tNy;
-    Nz = tNz;
+    Nz = tNz/size;
 
     /* Source coordinates: initialized here b/c not constant with
      * different domain sizes
@@ -364,16 +364,16 @@ border_exchange ( void )
     // Exchange border for each valid array
     if(size > 1){
         if(rank == 0){  //Rank 0
-            MPI_Send(temp[0] + (N)*(M + 2), M+2, MPI_DOUBLE, 1, 42, MPI_COMM_WORLD);
-            MPI_Recv(temp[0] + (N+1)*(M + 2), M+2, MPI_DOUBLE, 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(arr, M+2, MPI_DOUBLE, 1, 42, MPI_COMM_WORLD);
+            MPI_Recv(arr, M+2, MPI_DOUBLE, 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         } else if (rank == size - 1) { //Rank size-1
-            MPI_Recv(temp[0], M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Send(temp[0] + (M+2), M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD);;
+            MPI_Recv(arr, M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(arr, M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD);;
         } else { 
-            MPI_Send(temp[0] + (M+2), M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD);
-            MPI_Recv(temp[0], M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Send(temp[0] + (N)*(M + 2), M+2, MPI_DOUBLE, rank + 1, 42, MPI_COMM_WORLD);
-            MPI_Recv(temp[0] + (N+1)*(M + 2), M+2, MPI_DOUBLE, rank + 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(arr, M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD);
+            MPI_Recv(arr, M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(arr, M+2, MPI_DOUBLE, rank + 1, 42, MPI_COMM_WORLD);
+            MPI_Recv(arr, M+2, MPI_DOUBLE, rank + 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
     }
 }
