@@ -81,6 +81,10 @@ main ( int argc, char **argv )
 
     int_t BroadcastBuffer[5];
     if(rank == 0){
+        if (ceil(log2(size)) != floor(log2(size))) {
+            fprintf( stderr, "\nInvalid number of mpi ranks. Please choose a power of 2\n\n" );
+            exit(1);
+        }
         options ( argc, argv );
         BroadcastBuffer[0] = tNx;
         BroadcastBuffer[1] = tNy;
