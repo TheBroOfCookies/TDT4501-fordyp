@@ -18,6 +18,7 @@
 void options ( int argc, char **argv );
 void config_print ( double elapsed_time );
 void time_step ( int_t iteration );
+void border_exhange ( void );
 void insert_source ( int_t ts, source_t type );
 
 /* Weight coefficients, inner diff. loop */
@@ -84,6 +85,7 @@ main ( int argc, char **argv )
         BroadcastBuffer[2] = tNz;
         BroadcastBuffer[3] = Nt;
         BroadcastBuffer[4] = st;
+        printf("%d",HALO);
     }
 
     MPI_Bcast( BroadcastBuffer, 5, MPI_INT64_T, 0, MPI_COMM_WORLD);
@@ -147,6 +149,7 @@ main ( int argc, char **argv )
     gettimeofday ( &t_start, NULL );
     for ( int_t t=0; t<Nt; t++ )
         time_step ( t );
+        border_exhange();
     gettimeofday ( &t_end, NULL );
 
 #ifdef SAVE_RECEIVERS
@@ -181,7 +184,7 @@ insert_source ( int_t ts, source_t type )
     switch ( type )
     {
         case STRESS:
-            SXX(z,y,x) += s * kDt; printf("SXX %f, rank %d\n", SXX(z,y,x), rank);
+            SXX(z,y,x) += s * kDt; //printf("SXX %f, rank %d\n", SXX(z,y,x), rank);
             SYY(z,y,x) += s * kDt;
             SZZ(z,y,x) += s * kDt;
             break;
@@ -355,6 +358,26 @@ time_step ( int_t ts )
                 );
 }
 
+void
+border_exchange ( void )
+{
+    // Exchange border for each valid array
+    if(size > 1){
+        if(rank == 0){  //Rank 0
+            MPI_Send(temp[0] + (N)*(M + 2), M+2, MPI_DOUBLE, 1, 42, MPI_COMM_WORLD);
+            MPI_Recv(temp[0] + (N+1)*(M + 2), M+2, MPI_DOUBLE, 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        } else if (rank == size - 1) { //Rank size-1
+            MPI_Recv(temp[0], M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(temp[0] + (M+2), M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD);;
+        } else { 
+            MPI_Send(temp[0] + (M+2), M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD);
+            MPI_Recv(temp[0], M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(temp[0] + (N)*(M + 2), M+2, MPI_DOUBLE, rank + 1, 42, MPI_COMM_WORLD);
+            MPI_Recv(temp[0] + (N+1)*(M + 2), M+2, MPI_DOUBLE, rank + 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+    }
+}
+
 
 void
 model_init ( model_t *model )
@@ -375,7 +398,7 @@ model_init ( model_t *model )
 
 void
 model_set_uniform ( model_t *model )
-{
+{ 
     real_t
         mu     = kRho * pow(kVs,2.0),
         lambda = ( pow(kVp,2.0) * kRho ) - ( 2.0 * mu );
