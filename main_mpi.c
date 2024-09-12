@@ -98,7 +98,7 @@ main ( int argc, char **argv )
         case 3:   source_type=F_DIP; break;
     }
 
-    Nx = tNx/size;
+    Nx = tNx/size;   //simple x decomposition
     Ny = tNy;
     Nz = tNz;
 
@@ -140,6 +140,9 @@ main ( int argc, char **argv )
     mesh_init ( mesh );
     model_set_uniform ( model );
 
+    printf("Setup complete for rank: %d \n", rank);
+    
+
     struct timeval t_start, t_end;
     gettimeofday ( &t_start, NULL );
     for ( int_t t=0; t<Nt; t++ )
@@ -178,7 +181,7 @@ insert_source ( int_t ts, source_t type )
     switch ( type )
     {
         case STRESS:
-            SXX(z,y,x) += s * kDt;
+            SXX(z,y,x) += s * kDt; printf("SXX %f, rank %d\n", SXX(z,y,x), rank);
             SYY(z,y,x) += s * kDt;
             SZZ(z,y,x) += s * kDt;
             break;
