@@ -18,7 +18,8 @@
 void options ( int argc, char **argv );
 void config_print ( double elapsed_time );
 void time_step ( int_t iteration );
-void border_exhange ( void );
+void border_exchange_all ( void );
+void border_exchange ( real_t *startS, real_t *startR, real_t *endS, real_t *endR );
 void insert_source ( int_t ts, source_t type );
 
 /* Weight coefficients, inner diff. loop */
@@ -72,6 +73,7 @@ main ( int argc, char **argv )
     
 
     // MPI setup
+
     MPI_Init (&argc, &argv);
 
     MPI_Comm_rank ( MPI_COMM_WORLD, &rank );
@@ -85,7 +87,7 @@ main ( int argc, char **argv )
         BroadcastBuffer[2] = tNz;
         BroadcastBuffer[3] = Nt;
         BroadcastBuffer[4] = st;
-        printf("%d",HALO);
+        printf("Halo size = %d\n",HALO);
     }
 
     MPI_Bcast( BroadcastBuffer, 5, MPI_INT64_T, 0, MPI_COMM_WORLD);
@@ -141,24 +143,21 @@ main ( int argc, char **argv )
     model_init ( model );
     mesh_init ( mesh );
     model_set_uniform ( model );
-
-    printf("Setup complete for rank: %d \n", rank);
     
 
     struct timeval t_start, t_end;
     gettimeofday ( &t_start, NULL );
-    for ( int_t t=0; t<Nt; t++ )
+    for ( int_t t=0; t<Nt; t++ ) {
         time_step ( t );
-        border_exhange();
+        if(size > 1) border_exchange_all();
+    }
     gettimeofday ( &t_end, NULL );
 
 #ifdef SAVE_RECEIVERS
     receiver_write ( recv );
 #endif
 
-    if (rank==0){
-        config_print (WALLTIME(t_end) - WALLTIME(t_start) );
-    }
+    if (rank==0){config_print (WALLTIME(t_end) - WALLTIME(t_start) );}
 
     mesh_destroy ( mesh );
     model_destroy ( model );
@@ -211,8 +210,8 @@ insert_source ( int_t ts, source_t type )
 void
 time_step ( int_t ts )
 {
-//    if ( ts % 100 == 0 )
-//        printf ( "Iter %ld\n", ts );
+    //if ( ts % 100 == 0 )
+    //    printf ( "Iter %ld\n", ts );
 
     /* Insert source: stress, monopole force, or dipole force */
     insert_source ( ts, source_type );    
@@ -357,26 +356,49 @@ time_step ( int_t ts )
                     * 0.25 * (DEL1(k,j,i)+DEL2(k,j,i))
                 );
 }
-
 void
-border_exchange ( void )
+border_exchange_all ( void )
+{
+    border_exchange(&VX(HNz-2,0,0), &VX(HNz-1,0,0), &VX(1,0,0), &VX(0,0,0));
+    border_exchange(&VY(HNz-2,0,0), &VY(HNz-1,0,0), &VY(1,0,0), &VY(0,0,0));
+    border_exchange(&VZ(HNz-2,0,0), &VZ(HNz-1,0,0), &VZ(1,0,0), &VZ(0,0,0));
+/*
+
+    border_exchange(&SXX(HNz-2,0,0), &SXX(HNz-1,0,0), &SXX(1,0,0), &SXX(0,0,0));
+    border_exchange(&SYY(HNz-2,0,0), &SYY(HNz-1,0,0), &SYY(1,0,0), &SYY(0,0,0));
+    border_exchange(&SZZ(HNz-2,0,0), &SZZ(HNz-1,0,0), &SZZ(1,0,0), &SZZ(0,0,0));
+
+    border_exchange(&SXY(HNz-2,0,0), &SXY(HNz-1,0,0), &SXY(1,0,0), &SXY(0,0,0));
+    border_exchange(&SYZ(HNz-2,0,0), &SYZ(HNz-1,0,0), &SYZ(1,0,0), &SYZ(0,0,0));
+    border_exchange(&SXZ(HNz-2,0,0), &SXZ(HNz-1,0,0), &SXZ(1,0,0), &SXZ(0,0,0));
+*/
+}
+void
+border_exchange ( real_t *upS, real_t *upR, real_t *downS, real_t *downR )
 {
     // Exchange border for each valid array
-    if(size > 1){
-        if(rank == 0){  //Rank 0
-            MPI_Send(arr, M+2, MPI_DOUBLE, 1, 42, MPI_COMM_WORLD);
-            MPI_Recv(arr, M+2, MPI_DOUBLE, 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        } else if (rank == size - 1) { //Rank size-1
-            MPI_Recv(arr, M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Send(arr, M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD);;
-        } else { 
-            MPI_Send(arr, M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD);
-            MPI_Recv(arr, M+2, MPI_DOUBLE, rank - 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Send(arr, M+2, MPI_DOUBLE, rank + 1, 42, MPI_COMM_WORLD);
-            MPI_Recv(arr, M+2, MPI_DOUBLE, rank + 1, 42, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
+    int count = HNx*HNy;
+    if(rank != size - 1){  //Rank 0
+        //printf("Rank %d sending...\n", rank);
+        MPI_Send(upS, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD);
+        //printf("Rank %d receiving...\n", rank);
+        MPI_Recv(upR, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        //MPI_Sendrecv(&VX(HNz-2,0,0), count, MPI_FLOAT, rank + 1, 0, 
+        //             &VX(HNz-1,0,0), count, MPI_FLOAT, rank + 1, 0, 
+        //             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    } 
+    if (rank != 0) { //Rank size-1
+        //printf("Rank %d receiving...\n", rank);
+        MPI_Recv(downR, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        //printf("Rank %d sending...\n", rank);
+        MPI_Send(downS, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD);
+        //MPI_Sendrecv(&VX(1,0,0), count, MPI_FLOAT, rank - 1, 0, 
+        //             &VX(0,0,0), count, MPI_FLOAT, rank - 1, 0, 
+        //             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
+    //printf("Rank %d Exchange complete\n", rank);
 }
+
 
 
 void
@@ -651,11 +673,17 @@ config_print ( double elapsed_time )
         case F_MONOP: printf ( "Source type:\tForce monopole\n" );  break;
         case F_DIP:   printf ( "Source type:\tForce dipole\n" );    break;
     }
-    printf ( "Grid size\t%ld x %ld x %ld\n", tNx, tNy, tNz );
+    printf ( "Grid size\n" );
+    printf ( "  Total\t\t%ld x %ld x %ld\n", tNx, tNy, tNz );
+    printf ( "  Per rank\t%ld x %ld x %ld\n", Nx, Ny, Nz );
+    printf ( "Ranks\t\t%d\n", size );
     printf ( "Iterations\t%ld\n", Nt );
     printf ( "Compute time\t%.4lf\n", elapsed_time );
     printf ( "Total effective MLUPS\t%.5lf\n",
         Nt*tNx*tNy*tNz*1.0e-6 / elapsed_time
+    );
+    printf ( "       Per rank MULPS\t%.5lf\n",
+        Nt*tNx*tNy*tNz*1.0e-6 / (elapsed_time*size)
     );
 }
 
