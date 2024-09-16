@@ -127,8 +127,10 @@ main ( int argc, char **argv )
         real_t arg = pow ( M_PI * kF0 * (kDt * t - kT0), 2.0 );
         source[t] = 1.0e4 * (2.0 * arg - 1.0) * exp(-arg);
     }
+    printf("measure points %ld, %ld\n", source_z-20, source_z+20);
 
 #ifdef SAVE_RECEIVERS
+    printf("Source %ld\n",source_z);
     recv = malloc(sizeof(receiver_t));
     int_t nrecvs;
     switch ( tNz )
@@ -155,24 +157,21 @@ main ( int argc, char **argv )
         for ( int_t r=0; r<size; r++ ) {
             int maxz = (r+1)*Nz-1;
             int minz = r*Nz;
-            if(maxz >= 42 && minz <= 42) {
-                
+            if(maxz >= 52 && minz <= 52) {
                 rcv1_rank = r;
                 rcv1_min = minz;
-
             }
             if(maxz >= 12 && minz <= 12) {
-                
                 rcv0_rank = r;
                 rcv0_min = minz;
             }
         }
 
-        nrecvs = nrecvs/2;
         if (rank == rcv0_rank || rank == rcv1_rank){
+            printf("rcv0_min %d, measure point %d\n", rcv0_min, 12 - rcv0_min);
+            printf("rcv1_min %d\n", rcv1_min);
             printf("Rank %d deisgnated reciever\n", rank);
             receiver_init ( recv, nrecvs, false, true, true, true );
-            printf("Init compelete Rank %d\n", rank);
             receiver_setup ( recv );
             printf("Setup compelete Rank %d\n", rank);
         } /* END Parallel section for saving recievers*/
@@ -188,7 +187,7 @@ main ( int argc, char **argv )
     mesh_init ( mesh );
     model_set_uniform ( model );
     
-
+    printf("Completed setup for Rank %d\n", rank);
     struct timeval t_start, t_end;
     gettimeofday ( &t_start, NULL );
     for ( int_t t=0; t<Nt; t++ ) {
@@ -268,7 +267,8 @@ time_step ( int_t ts )
 
     /* Collect samples, if enabled */
 #ifdef SAVE_RECEIVERS
-    receiver_save ( ts, recv );
+    if (size > 1) { receiver_save_MPI ( ts, recv ); }
+    else { receiver_save ( ts, recv ); }
 #endif
 
     /* Call pattern: to, from, scale
@@ -427,23 +427,13 @@ border_exchange ( real_t *upS, real_t *upR, real_t *downS, real_t *downR )
 {
     // Exchange border for each valid array
     int count = HNx*HNy;
-    if(rank != size - 1){  //Rank 0
-        //printf("Rank %d sending...\n", rank);
+    if(rank != size - 1) {
         MPI_Send(upS, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD);
-        //printf("Rank %d receiving...\n", rank);
         MPI_Recv(upR, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        //MPI_Sendrecv(&VX(HNz-2,0,0), count, MPI_FLOAT, rank + 1, 0, 
-        //             &VX(HNz-1,0,0), count, MPI_FLOAT, rank + 1, 0, 
-        //             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     } 
-    if (rank != 0) { //Rank size-1
-        //printf("Rank %d receiving...\n", rank);
+    if (rank != 0) {
         MPI_Recv(downR, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        //printf("Rank %d sending...\n", rank);
         MPI_Send(downS, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD);
-        //MPI_Sendrecv(&VX(1,0,0), count, MPI_FLOAT, rank - 1, 0, 
-        //             &VX(0,0,0), count, MPI_FLOAT, rank - 1, 0, 
-        //             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
     //printf("Rank %d Exchange complete\n", rank);
 }
@@ -581,16 +571,16 @@ receiver_setup ( receiver_t *recv )
     int_t x=source_x, y=source_y, z=source_z;
     if(size > 1) {
         if (rcv1_rank == rank){
-            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = 42 - rcv1_min;
-            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = 42 - rcv1_min;
-            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = 42 - rcv1_min;
-            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = 42 - rcv1_min;
+            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = 53 - rcv1_min;
+            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = 53 - rcv1_min;
+            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = 53 - rcv1_min;
+            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = 53 - rcv1_min;
         }
         if (rcv0_rank == rank){
-            recv->x[0] = x+20, recv->y[4] = y+20, recv->z[4] = 12 - rcv0_min;   //actual 4
-            recv->x[1] = x-20, recv->y[5] = y+20, recv->z[5] = 12 - rcv0_min;   //actual 5
-            recv->x[2] = x-20, recv->y[6] = y-20, recv->z[6] = 12 - rcv0_min;   //actual 6
-            recv->x[3] = x+20, recv->y[7] = y-20, recv->z[7] = 12 - rcv0_min;   //actual 7
+            recv->x[0] = x+20, recv->y[4] = y+20, recv->z[4] = 13 - rcv0_min;   //actual 4
+            recv->x[1] = x-20, recv->y[5] = y+20, recv->z[5] = 13 - rcv0_min;   //actual 5
+            recv->x[2] = x-20, recv->y[6] = y-20, recv->z[6] = 13 - rcv0_min;   //actual 6
+            recv->x[3] = x+20, recv->y[7] = y-20, recv->z[7] = 13 - rcv0_min;   //actual 7
         }
         return;
     }
@@ -675,14 +665,39 @@ receiver_save ( int_t ts, receiver_t *recv )
 }
 
 void
+receiver_save_MPI ( int_t ts, receiver_t *recv )
+{
+    for ( int_t r=0; r<recv->n/2; r++ ) {
+        // Convenience aliases
+        int_t k = recv->z[r], j = recv->y[r], i = recv->x[r];
+        if (rank == rcv1_rank) {
+            recv->vx[r*Nt+ts] = VX(k,j,i);
+            recv->vy[r*Nt+ts] = VY(k,j,i);
+            recv->vz[r*Nt+ts] = VZ(k,j,i);
+        } else if (rank == rcv0_rank){
+            MPI_Send(&VX(k,j,i), 1, MPI_FLOAT, rcv1_rank, 0, MPI_COMM_WORLD);
+            MPI_Send(&VY(k,j,i), 1, MPI_FLOAT, rcv1_rank, 1, MPI_COMM_WORLD);
+            MPI_Send(&VZ(k,j,i), 1, MPI_FLOAT, rcv1_rank, 2, MPI_COMM_WORLD);
+        }
+    }
+    for ( int_t r=recv->n/2; r<recv->n; r++ ) {
+        if (rank == rcv1_rank) {
+            MPI_Recv(&recv->vx[r*Nt+ts], 1, MPI_FLOAT, rcv0_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&recv->vy[r*Nt+ts], 1, MPI_FLOAT, rcv0_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&recv->vz[r*Nt+ts], 1, MPI_FLOAT, rcv0_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+    }
+}
+
+void
 receiver_write_MPI ( receiver_t *recv )
 {
-    
-    FILE *out = fopen ( "receivers0.csv", "w" );
-    if (rank == rcv1_rank) {
-        fclose ( out );
-        out = fopen ( "receivers1.csv", "w" );
+    if (rank != rcv1_rank) {
+        return;
     }
+    
+    FILE *out = fopen ( "receivers_mpi.csv", "w" );
+
     fprintf ( out, "%ld\n%ld\n", recv->n, Nt );
     for ( int_t r=0; r<recv->n; r++ )
     {
