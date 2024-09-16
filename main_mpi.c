@@ -34,8 +34,9 @@ int_t
     tNx=0, tNy=0, tNz=0;
 
 int
-    rank,
-    size;
+    rank, size,
+    rcv0_rank, rcv0_min,
+    rcv1_rank, rcv1_min;
 
 source_t
     source_type = STRESS;
@@ -92,6 +93,7 @@ main ( int argc, char **argv )
         BroadcastBuffer[3] = Nt;
         BroadcastBuffer[4] = st;
         printf("Halo size = %d\n",HALO);
+        
     }
 
     MPI_Bcast( BroadcastBuffer, 5, MPI_INT64_T, 0, MPI_COMM_WORLD);
@@ -110,6 +112,11 @@ main ( int argc, char **argv )
     Ny = tNy;
     Nz = tNz/size;
 
+    
+    
+
+    
+
     /* Source coordinates: initialized here b/c not constant with
      * different domain sizes
      */
@@ -124,13 +131,12 @@ main ( int argc, char **argv )
 #ifdef SAVE_RECEIVERS
     recv = malloc(sizeof(receiver_t));
     int_t nrecvs;
-    switch ( Nz )
+    switch ( tNz )
     {
         case 64:   nrecvs = 8;  break;
         case 128:  nrecvs = 16; break;
         case 256:  nrecvs = 24; break;
         case 512:  nrecvs = 32; break;
-        case 1024: nrecvs = 40; break;
         default:
             nrecvs = 0;
             fprintf ( stderr,
@@ -138,8 +144,42 @@ main ( int argc, char **argv )
             );
             break;
     }
-    receiver_init ( recv, nrecvs, false, true, true, true );
-    receiver_setup ( recv );
+    /* START Parallel section for saving recievers*/
+    if(size > 1) {
+
+        if (tNz != 64) {
+            fprintf( stderr, "\nTotal number of gridpoints in Z-direction must be 64 to support SAVE_RECIEVERS and MPI parallelizaiton.\n" );
+            exit(1);
+        }
+        
+        for ( int_t r=0; r<size; r++ ) {
+            int maxz = (r+1)*Nz-1;
+            int minz = r*Nz;
+            if(maxz >= 42 && minz <= 42) {
+                
+                rcv1_rank = r;
+                rcv1_min = minz;
+
+            }
+            if(maxz >= 12 && minz <= 12) {
+                
+                rcv0_rank = r;
+                rcv0_min = minz;
+            }
+        }
+
+        nrecvs = nrecvs/2;
+        if (rank == rcv0_rank || rank == rcv1_rank){
+            printf("Rank %d deisgnated reciever\n", rank);
+            receiver_init ( recv, nrecvs, false, true, true, true );
+            printf("Init compelete Rank %d\n", rank);
+            receiver_setup ( recv );
+            printf("Setup compelete Rank %d\n", rank);
+        } /* END Parallel section for saving recievers*/
+    } else {
+        receiver_init ( recv, nrecvs, false, true, true, true );
+        receiver_setup ( recv );
+    }
 #endif
 
     model = malloc (sizeof(model_t));
@@ -152,13 +192,19 @@ main ( int argc, char **argv )
     struct timeval t_start, t_end;
     gettimeofday ( &t_start, NULL );
     for ( int_t t=0; t<Nt; t++ ) {
-        time_step ( t );
         if(size > 1) border_exchange_all();
+        time_step ( t );
     }
     gettimeofday ( &t_end, NULL );
 
 #ifdef SAVE_RECEIVERS
-    receiver_write ( recv );
+    if(size > 1){
+        if (rcv1_rank == rank || rcv0_rank == rank){
+            receiver_write_MPI ( recv );
+        }
+    } else {
+        receiver_write ( recv );
+    }
 #endif
 
     if (rank==0){config_print (WALLTIME(t_end) - WALLTIME(t_start) );}
@@ -366,7 +412,6 @@ border_exchange_all ( void )
     border_exchange(&VX(HNz-2,0,0), &VX(HNz-1,0,0), &VX(1,0,0), &VX(0,0,0));
     border_exchange(&VY(HNz-2,0,0), &VY(HNz-1,0,0), &VY(1,0,0), &VY(0,0,0));
     border_exchange(&VZ(HNz-2,0,0), &VZ(HNz-1,0,0), &VZ(1,0,0), &VZ(0,0,0));
-/*
 
     border_exchange(&SXX(HNz-2,0,0), &SXX(HNz-1,0,0), &SXX(1,0,0), &SXX(0,0,0));
     border_exchange(&SYY(HNz-2,0,0), &SYY(HNz-1,0,0), &SYY(1,0,0), &SYY(0,0,0));
@@ -375,7 +420,7 @@ border_exchange_all ( void )
     border_exchange(&SXY(HNz-2,0,0), &SXY(HNz-1,0,0), &SXY(1,0,0), &SXY(0,0,0));
     border_exchange(&SYZ(HNz-2,0,0), &SYZ(HNz-1,0,0), &SYZ(1,0,0), &SYZ(0,0,0));
     border_exchange(&SXZ(HNz-2,0,0), &SXZ(HNz-1,0,0), &SXZ(1,0,0), &SXZ(0,0,0));
-*/
+
 }
 void
 border_exchange ( real_t *upS, real_t *upR, real_t *downS, real_t *downR )
@@ -534,6 +579,21 @@ receiver_setup ( receiver_t *recv )
         return;
     // Convenience aliases
     int_t x=source_x, y=source_y, z=source_z;
+    if(size > 1) {
+        if (rcv1_rank == rank){
+            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = 42 - rcv1_min;
+            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = 42 - rcv1_min;
+            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = 42 - rcv1_min;
+            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = 42 - rcv1_min;
+        }
+        if (rcv0_rank == rank){
+            recv->x[0] = x+20, recv->y[4] = y+20, recv->z[4] = 12 - rcv0_min;   //actual 4
+            recv->x[1] = x-20, recv->y[5] = y+20, recv->z[5] = 12 - rcv0_min;   //actual 5
+            recv->x[2] = x-20, recv->y[6] = y-20, recv->z[6] = 12 - rcv0_min;   //actual 6
+            recv->x[3] = x+20, recv->y[7] = y-20, recv->z[7] = 12 - rcv0_min;   //actual 7
+        }
+        return;
+    }
 
     /* Incremental configuration: break statements omitted on purpose
      * "// Falls through"-comments silence gcc warning when
@@ -612,6 +672,48 @@ receiver_save ( int_t ts, receiver_t *recv )
         if ( recv->vz )
             recv->vz[r*Nt+ts] = VZ(k,j,i);
     }
+}
+
+void
+receiver_write_MPI ( receiver_t *recv )
+{
+    
+    FILE *out = fopen ( "receivers0.csv", "w" );
+    if (rank == rcv1_rank) {
+        fclose ( out );
+        out = fopen ( "receivers1.csv", "w" );
+    }
+    fprintf ( out, "%ld\n%ld\n", recv->n, Nt );
+    for ( int_t r=0; r<recv->n; r++ )
+    {
+        if ( recv->p )
+        {
+            fprintf ( out, "P\n" );
+            for ( int_t t=0; t<Nt; t++ )
+                fprintf ( out, "%e\n", recv->p[r*Nt+t] );
+        }
+        if ( recv->vx )
+        {
+            fprintf ( out, "Vx\n" );
+            for ( int_t t=0; t<Nt; t++ )
+                fprintf ( out, "%e\n", recv->vx[r*Nt+t] );
+        }
+        if ( recv->vy )
+        {
+            fprintf ( out, "Vy\n" );
+            for ( int_t t=0; t<Nt; t++ )
+                fprintf ( out, "%e\n", recv->vy[r*Nt+t] );
+        }
+        if ( recv->vz )
+        {
+            fprintf ( out, "Vz\n" );
+            for ( int_t t=0; t<Nt; t++ )
+                fprintf ( out, "%e\n", recv->vz[r*Nt+t] );
+        }
+        fprintf ( out, "\n" );
+    }
+    fclose ( out );
+    return;
 }
 
 

@@ -127,3 +127,5 @@ void receiver_setup ( receiver_t *recv );
 void receiver_save ( int_t ts, receiver_t *recv );
 void receiver_write ( receiver_t *recv );
 void receiver_destroy ( receiver_t *recv );
+
+void receiver_write_MPI ( receiver_t *recv );
