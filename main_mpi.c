@@ -92,7 +92,6 @@ main ( int argc, char **argv )
         BroadcastBuffer[2] = tNz;
         BroadcastBuffer[3] = Nt;
         BroadcastBuffer[4] = st;
-        printf("Halo size = %d\n",HALO);
         
     }
 
@@ -127,14 +126,14 @@ main ( int argc, char **argv )
         real_t arg = pow ( M_PI * kF0 * (kDt * t - kT0), 2.0 );
         source[t] = 1.0e4 * (2.0 * arg - 1.0) * exp(-arg);
     }
-    printf("measure points %ld, %ld\n", source_z-20, source_z+20);
+
 
 #ifdef SAVE_RECEIVERS
-    printf("Source %ld\n",source_z);
     recv = malloc(sizeof(receiver_t));
     int_t nrecvs;
     switch ( tNz )
     {
+        case 32:   nrecvs = 4;  break;
         case 64:   nrecvs = 8;  break;
         case 128:  nrecvs = 16; break;
         case 256:  nrecvs = 24; break;
@@ -166,16 +165,14 @@ main ( int argc, char **argv )
                 rcv0_min = minz;
             }
         }
-
+        //nrecvs = nrecvs/2;  //Currently using nrecvs = 8 to collect all data points in one rank
         if (rank == rcv0_rank || rank == rcv1_rank){
-            printf("rcv0_min %d, measure point %d\n", rcv0_min, 12 - rcv0_min);
-            printf("rcv1_min %d\n", rcv1_min);
             printf("Rank %d deisgnated reciever\n", rank);
             receiver_init ( recv, nrecvs, false, true, true, true );
             receiver_setup ( recv );
-            printf("Setup compelete Rank %d\n", rank);
         } /* END Parallel section for saving recievers*/
     } else {
+        printf("measure points %ld, %ld\n", source_z-20, source_z+20);
         receiver_init ( recv, nrecvs, false, true, true, true );
         receiver_setup ( recv );
     }
@@ -423,17 +420,17 @@ border_exchange_all ( void )
 
 }
 void
-border_exchange ( real_t *upS, real_t *upR, real_t *downS, real_t *downR )
+border_exchange ( real_t *upSnd, real_t *upRcv, real_t *downSnd, real_t *downRcv )
 {
     // Exchange border for each valid array
     int count = HNx*HNy;
     if(rank != size - 1) {
-        MPI_Send(upS, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD);
-        MPI_Recv(upR, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(upSnd, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD);
+        MPI_Recv(upRcv, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     } 
     if (rank != 0) {
-        MPI_Recv(downR, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Send(downS, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD);
+        MPI_Recv(downRcv, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(downSnd, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD);
     }
     //printf("Rank %d Exchange complete\n", rank);
 }
@@ -571,16 +568,19 @@ receiver_setup ( receiver_t *recv )
     int_t x=source_x, y=source_y, z=source_z;
     if(size > 1) {
         if (rcv1_rank == rank){
-            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = 53 - rcv1_min;
-            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = 53 - rcv1_min;
-            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = 53 - rcv1_min;
-            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = 53 - rcv1_min;
+            int offset = 52 + HALO;
+            printf("%d - rcv1_min = %d\n", offset, offset - rcv1_min);
+            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = offset - rcv1_min;
+            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = offset - rcv1_min;
+            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = offset - rcv1_min;
+            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = offset - rcv1_min;
         }
         if (rcv0_rank == rank){
-            recv->x[0] = x+20, recv->y[4] = y+20, recv->z[4] = 13 - rcv0_min;   //actual 4
-            recv->x[1] = x-20, recv->y[5] = y+20, recv->z[5] = 13 - rcv0_min;   //actual 5
-            recv->x[2] = x-20, recv->y[6] = y-20, recv->z[6] = 13 - rcv0_min;   //actual 6
-            recv->x[3] = x+20, recv->y[7] = y-20, recv->z[7] = 13 - rcv0_min;   //actual 7
+            int offset = 12 + HALO;
+            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = offset - rcv0_min;   //actual 4
+            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = offset - rcv0_min;   //actual 5
+            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = offset - rcv0_min;   //actual 6
+            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = offset - rcv0_min;   //actual 7
         }
         return;
     }
@@ -641,6 +641,12 @@ receiver_setup ( receiver_t *recv )
             recv->x[6] = x-20, recv->y[6] = y-20, recv->z[6] = z-20;
             recv->x[7] = x+20, recv->y[7] = y-20, recv->z[7] = z-20;
             break;
+        case 32:
+            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = 13;    //left = 13
+            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = 13;    //right = 20
+            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = 13;
+            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = 13;
+            break;
     }
 }
 
@@ -668,25 +674,39 @@ void
 receiver_save_MPI ( int_t ts, receiver_t *recv )
 {
     for ( int_t r=0; r<recv->n/2; r++ ) {
-        // Convenience aliases
         int_t k = recv->z[r], j = recv->y[r], i = recv->x[r];
         if (rank == rcv1_rank) {
             recv->vx[r*Nt+ts] = VX(k,j,i);
             recv->vy[r*Nt+ts] = VY(k,j,i);
             recv->vz[r*Nt+ts] = VZ(k,j,i);
-        } else if (rank == rcv0_rank){
-            MPI_Send(&VX(k,j,i), 1, MPI_FLOAT, rcv1_rank, 0, MPI_COMM_WORLD);
-            MPI_Send(&VY(k,j,i), 1, MPI_FLOAT, rcv1_rank, 1, MPI_COMM_WORLD);
-            MPI_Send(&VZ(k,j,i), 1, MPI_FLOAT, rcv1_rank, 2, MPI_COMM_WORLD);
-        }
+        } 
+        /*
+        else if (rank == rcv0_rank) {
+            real_t buf[3];
+            buf[0] = VX(k,j,i);
+            buf[1] = VY(k,j,i);
+            buf[2] = VZ(k,j,i);
+            printf("%f, %f, %f", buf[0], buf[1], buf[2]);
+            MPI_Send(&buf[0], 3, MPI_FLOAT, rcv1_rank, 0, MPI_COMM_WORLD);
+        } 
+        */
+       if (rank == rcv0_rank) {
+            recv->vx[r*Nt+ts] = VX(k,j,i);
+            recv->vy[r*Nt+ts] = VY(k,j,i);
+            recv->vz[r*Nt+ts] = VZ(k,j,i);
+        } 
     }
+    /*
     for ( int_t r=recv->n/2; r<recv->n; r++ ) {
         if (rank == rcv1_rank) {
-            MPI_Recv(&recv->vx[r*Nt+ts], 1, MPI_FLOAT, rcv0_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(&recv->vy[r*Nt+ts], 1, MPI_FLOAT, rcv0_rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(&recv->vz[r*Nt+ts], 1, MPI_FLOAT, rcv0_rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            real_t buf[3];
+            MPI_Recv(&buf[0], 3, MPI_FLOAT, rcv0_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            recv->vx[r*Nt+ts] = buf[0];
+            recv->vy[r*Nt+ts] = buf[1];
+            recv->vz[r*Nt+ts] = buf[2];
         }
     }
+    */
 }
 
 void
@@ -803,7 +823,7 @@ config_print ( double elapsed_time )
     printf ( "Total effective MLUPS\t%.5lf\n",
         Nt*tNx*tNy*tNz*1.0e-6 / elapsed_time
     );
-    printf ( "       Per rank MULPS\t%.5lf\n",
+    printf ( "       Per rank MLUPS\t%.5lf\n",
         Nt*tNx*tNy*tNz*1.0e-6 / (elapsed_time*size)
     );
 }
