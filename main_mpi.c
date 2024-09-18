@@ -14,6 +14,7 @@
 
 #define WALLTIME(t) ((double)(t).tv_sec + 1e-6 * (double)(t).tv_usec)
 
+
 /* Function prototypes */
 void options ( int argc, char **argv );
 void config_print ( double elapsed_time );
@@ -35,8 +36,12 @@ int_t
 
 int
     rank, size,
-    rcv0_rank, rcv0_min,
-    rcv1_rank, rcv1_min;
+    rcv1_rank, rcv0_rank;
+
+int_t
+    rcv0_min, rcv1_min,
+    maxz, minz;
+
 
 source_t
     source_type = STRESS;
@@ -111,6 +116,10 @@ main ( int argc, char **argv )
     Ny = tNy;
     Nz = tNz/size;
 
+    maxz = (rank+1)*Nz-1;
+    minz = rank*Nz;
+    printf("Minz %ld, maxz %ld, rank %d\n", minz, maxz, rank);
+
     
     
 
@@ -119,7 +128,8 @@ main ( int argc, char **argv )
     /* Source coordinates: initialized here b/c not constant with
      * different domain sizes
      */
-    source_x = HNx/2, source_y = HNy/2, source_z = HNz/2;
+    source_x = HNx/2, source_y = HNy/2, source_z = (tNz+2*HALO)/2;
+    //source_x = HNx/2, source_y = HNy/2, source_z = HNz/2;
     source = malloc ( Nt * sizeof(real_t) );
     for ( int_t t=0; t<Nt; t++ )
     {
@@ -154,15 +164,15 @@ main ( int argc, char **argv )
         }
         
         for ( int_t r=0; r<size; r++ ) {
-            int maxz = (r+1)*Nz-1;
-            int minz = r*Nz;
-            if(maxz >= 52 && minz <= 52) {
+            int_t lmaxz = (r+1)*Nz-1;
+            int_t lminz = r*Nz;
+            if(lmaxz >= 52 && lminz <= 52) {
                 rcv1_rank = r;
-                rcv1_min = minz;
+                rcv1_min = lminz;
             }
-            if(maxz >= 12 && minz <= 12) {
+            if(lmaxz >= 12 && lminz <= 12) {
                 rcv0_rank = r;
-                rcv0_min = minz;
+                rcv0_min = lminz;
             }
         }
         //nrecvs = nrecvs/2;  //Currently using nrecvs = 8 to collect all data points in one rank
@@ -195,9 +205,7 @@ main ( int argc, char **argv )
 
 #ifdef SAVE_RECEIVERS
     if(size > 1){
-        if (rcv1_rank == rank || rcv0_rank == rank){
-            receiver_write_MPI ( recv );
-        }
+        receiver_write_MPI ( recv );
     } else {
         receiver_write ( recv );
     }
@@ -226,10 +234,15 @@ insert_source ( int_t ts, source_t type )
     int_t z=source_z, y=source_y, x=source_x;
     real_t s = source[ts];
     // Determine source type, act accordingly
+    if (z < minz || z > maxz+HALO) { return; }
+    z = z - (minz);
+    //if (rank == rcv0_rank) z = 33;
+    //if (rank == rcv1_rank) z = 1; 
+    //printf("z %ld\n", z);
     switch ( type )
     {
         case STRESS:
-            SXX(z,y,x) += s * kDt; //printf("SXX %f, rank %d\n", SXX(z,y,x), rank);
+            SXX(z,y,x) += s * kDt;
             SYY(z,y,x) += s * kDt;
             SZZ(z,y,x) += s * kDt;
             break;
@@ -260,7 +273,9 @@ time_step ( int_t ts )
     //    printf ( "Iter %ld\n", ts );
 
     /* Insert source: stress, monopole force, or dipole force */
-    insert_source ( ts, source_type );    
+ 
+    insert_source ( ts, source_type );  
+
 
     /* Collect samples, if enabled */
 #ifdef SAVE_RECEIVERS
@@ -406,6 +421,7 @@ time_step ( int_t ts )
 void
 border_exchange_all ( void )
 {
+
     border_exchange(&VX(HNz-2,0,0), &VX(HNz-1,0,0), &VX(1,0,0), &VX(0,0,0));
     border_exchange(&VY(HNz-2,0,0), &VY(HNz-1,0,0), &VY(1,0,0), &VY(0,0,0));
     border_exchange(&VZ(HNz-2,0,0), &VZ(HNz-1,0,0), &VZ(1,0,0), &VZ(0,0,0));
@@ -418,21 +434,34 @@ border_exchange_all ( void )
     border_exchange(&SYZ(HNz-2,0,0), &SYZ(HNz-1,0,0), &SYZ(1,0,0), &SYZ(0,0,0));
     border_exchange(&SXZ(HNz-2,0,0), &SXZ(HNz-1,0,0), &SXZ(1,0,0), &SXZ(0,0,0));
 
+/* 
+    border_exchange(&VX(HNz-2*HALO,0,0), &VX(HNz-HALO,0,0), &VX(HALO,0,0), &VX(0,0,0));
+    border_exchange(&VY(HNz-2*HALO,0,0), &VY(HNz-HALO,0,0), &VY(HALO,0,0), &VY(0,0,0));
+    border_exchange(&VZ(HNz-2*HALO,0,0), &VZ(HNz-HALO,0,0), &VZ(HALO,0,0), &VZ(0,0,0));
+
+    border_exchange(&SXX(HNz-2*HALO,0,0), &SXX(HNz-HALO,0,0), &SXX(HALO,0,0), &SXX(0,0,0));
+    border_exchange(&SYY(HNz-2*HALO,0,0), &SYY(HNz-HALO,0,0), &SYY(HALO,0,0), &SYY(0,0,0));
+    border_exchange(&SZZ(HNz-2*HALO,0,0), &SZZ(HNz-HALO,0,0), &SZZ(HALO,0,0), &SZZ(0,0,0));
+
+    border_exchange(&SXY(HNz-2*HALO,0,0), &SXY(HNz-HALO,0,0), &SXY(HALO,0,0), &SXY(0,0,0));
+    border_exchange(&SYZ(HNz-2*HALO,0,0), &SYZ(HNz-HALO,0,0), &SYZ(HALO,0,0), &SYZ(0,0,0));
+    border_exchange(&SXZ(HNz-2*HALO,0,0), &SXZ(HNz-HALO,0,0), &SXZ(HALO,0,0), &SXZ(0,0,0));
+ */
+
 }
 void
 border_exchange ( real_t *upSnd, real_t *upRcv, real_t *downSnd, real_t *downRcv )
 {
     // Exchange border for each valid array
-    int count = HNx*HNy;
-    if(rank != size - 1) {
+    int count = HNx*HNy*HALO; 
+    if(rank != size - 1) { //if not last rank, send up
         MPI_Send(upSnd, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD);
         MPI_Recv(upRcv, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     } 
-    if (rank != 0) {
+    if (rank != 0) {  //if not first rank, send down
         MPI_Recv(downRcv, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Send(downSnd, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD);
     }
-    //printf("Rank %d Exchange complete\n", rank);
 }
 
 
@@ -567,20 +596,20 @@ receiver_setup ( receiver_t *recv )
     // Convenience aliases
     int_t x=source_x, y=source_y, z=source_z;
     if(size > 1) {
-        if (rcv1_rank == rank){
-            int offset = 52 + HALO;
-            printf("%d - rcv1_min = %d\n", offset, offset - rcv1_min);
-            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = offset - rcv1_min;
-            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = offset - rcv1_min;
-            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = offset - rcv1_min;
-            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = offset - rcv1_min;
+        if (rcv1_rank == rank) {
+            printf("%ld rank %d\n", z+20 - minz, rank);
+            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z+20 - minz;
+            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z+20 - minz;
+            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = z+20 - minz;
+            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z+20 - minz;
         }
-        if (rcv0_rank == rank){
-            int offset = 12 + HALO;
-            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = offset - rcv0_min;   //actual 4
-            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = offset - rcv0_min;   //actual 5
-            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = offset - rcv0_min;   //actual 6
-            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = offset - rcv0_min;   //actual 7
+        if (rcv0_rank == rank) {
+            //int_t offset = 12 + HALO;
+            printf("%ld rank %d\n", z-20 - minz, rank);
+            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z-20 - minz;   //actual z[4]
+            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z-20 - minz;   //actual z[5]
+            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = z-20 - minz;   //actual z[6]
+            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z-20 - minz;   //actual z[7]
         }
         return;
     }
@@ -643,7 +672,7 @@ receiver_setup ( receiver_t *recv )
             break;
         case 32:
             recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = 13;    //left = 13
-            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = 13;    //right = 20
+            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = 13;    //right = 21
             recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = 13;
             recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = 13;
             break;
@@ -680,33 +709,30 @@ receiver_save_MPI ( int_t ts, receiver_t *recv )
             recv->vy[r*Nt+ts] = VY(k,j,i);
             recv->vz[r*Nt+ts] = VZ(k,j,i);
         } 
-        /*
-        else if (rank == rcv0_rank) {
-            real_t buf[3];
-            buf[0] = VX(k,j,i);
-            buf[1] = VY(k,j,i);
-            buf[2] = VZ(k,j,i);
-            printf("%f, %f, %f", buf[0], buf[1], buf[2]);
-            MPI_Send(&buf[0], 3, MPI_FLOAT, rcv1_rank, 0, MPI_COMM_WORLD);
-        } 
-        */
-       if (rank == rcv0_rank) {
+        if (rank == rcv0_rank) {
             recv->vx[r*Nt+ts] = VX(k,j,i);
             recv->vy[r*Nt+ts] = VY(k,j,i);
             recv->vz[r*Nt+ts] = VZ(k,j,i);
         } 
     }
-    /*
-    for ( int_t r=recv->n/2; r<recv->n; r++ ) {
+
+    for ( int_t r=0; r<recv->n/2; r++ ) {
+        if (rank == rcv0_rank) {
+            real_t buf[3];
+            buf[0] = recv->vx[r*Nt+ts];
+            buf[1] = recv->vy[r*Nt+ts];
+            buf[2] = recv->vz[r*Nt+ts];
+            MPI_Send(&buf[0], 3, MPI_FLOAT, rcv1_rank, r, MPI_COMM_WORLD);
+        }
         if (rank == rcv1_rank) {
             real_t buf[3];
-            MPI_Recv(&buf[0], 3, MPI_FLOAT, rcv0_rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            recv->vx[r*Nt+ts] = buf[0];
-            recv->vy[r*Nt+ts] = buf[1];
-            recv->vz[r*Nt+ts] = buf[2];
-        }
+            MPI_Recv(&buf[0], 3, MPI_FLOAT, rcv0_rank, r, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            recv->vx[(r+recv->n/2)*Nt+ts] = buf[0];
+            recv->vy[(r+recv->n/2)*Nt+ts] = buf[1];
+            recv->vz[(r+recv->n/2)*Nt+ts] = buf[2];
+        } 
     }
-    */
+
 }
 
 void
@@ -821,11 +847,9 @@ config_print ( double elapsed_time )
     printf ( "Iterations\t%ld\n", Nt );
     printf ( "Compute time\t%.4lf\n", elapsed_time );
     printf ( "Total effective MLUPS\t%.5lf\n",
-        Nt*tNx*tNy*tNz*1.0e-6 / elapsed_time
-    );
+        Nt*tNx*tNy*tNz*1.0e-6 / elapsed_time);
     printf ( "       Per rank MLUPS\t%.5lf\n",
-        Nt*tNx*tNy*tNz*1.0e-6 / (elapsed_time*size)
-    );
+        Nt*tNx*tNy*tNz*1.0e-6 / (elapsed_time*size));
 }
 
 
@@ -842,7 +866,7 @@ options ( int argc, char **argv )
         tNx = strtol ( argv[1], NULL, 10 );
         tNy = strtol ( argv[2], NULL, 10 );
         tNz = strtol ( argv[3], NULL, 10 );
-        Nt = strtol ( argv[4], NULL, 10 );
+        Nt = strtol  ( argv[4], NULL, 10 );
         switch ( strtol ( argv[5], NULL, 10 ) )
         {
             case STRESS:  source_type=STRESS; break;
