@@ -420,7 +420,7 @@ time_step ( int_t ts )
 void
 border_exchange_all ( void )
 {
-    //border exchanged used for HALO = 1
+/*     //border exchanged used for HALO = 1
     border_exchange(&VX(HNz-2,0,0), &VX(HNz-1,0,0), &VX(1,0,0), &VX(0,0,0));
     border_exchange(&VY(HNz-2,0,0), &VY(HNz-1,0,0), &VY(1,0,0), &VY(0,0,0));
     border_exchange(&VZ(HNz-2,0,0), &VZ(HNz-1,0,0), &VZ(1,0,0), &VZ(0,0,0));
@@ -432,9 +432,9 @@ border_exchange_all ( void )
     border_exchange(&SXY(HNz-2,0,0), &SXY(HNz-1,0,0), &SXY(1,0,0), &SXY(0,0,0));
     border_exchange(&SYZ(HNz-2,0,0), &SYZ(HNz-1,0,0), &SYZ(1,0,0), &SYZ(0,0,0));
     border_exchange(&SXZ(HNz-2,0,0), &SXZ(HNz-1,0,0), &SXZ(1,0,0), &SXZ(0,0,0));
-
+ */
     // generalized border exchange for variable HALO size
-/*     border_exchange(&VX(HNz-2*HALO,0,0), &VX(HNz-HALO,0,0), &VX(HALO,0,0), &VX(0,0,0));
+    border_exchange(&VX(HNz-2*HALO,0,0), &VX(HNz-HALO,0,0), &VX(HALO,0,0), &VX(0,0,0));
     border_exchange(&VY(HNz-2*HALO,0,0), &VY(HNz-HALO,0,0), &VY(HALO,0,0), &VY(0,0,0));
     border_exchange(&VZ(HNz-2*HALO,0,0), &VZ(HNz-HALO,0,0), &VZ(HALO,0,0), &VZ(0,0,0));
 
@@ -445,7 +445,7 @@ border_exchange_all ( void )
     border_exchange(&SXY(HNz-2*HALO,0,0), &SXY(HNz-HALO,0,0), &SXY(HALO,0,0), &SXY(0,0,0));
     border_exchange(&SYZ(HNz-2*HALO,0,0), &SYZ(HNz-HALO,0,0), &SYZ(HALO,0,0), &SYZ(0,0,0));
     border_exchange(&SXZ(HNz-2*HALO,0,0), &SXZ(HNz-HALO,0,0), &SXZ(HALO,0,0), &SXZ(0,0,0));
- */
+
 
 }
 void

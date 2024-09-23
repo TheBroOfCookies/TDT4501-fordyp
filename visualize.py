@@ -17,14 +17,14 @@ def make_plot(filename):
     
     
 
-points1 = make_plot("receivers_HALO=4.csv")
+points1 = make_plot("receivers.csv")
 points2 = make_plot("receivers_mpi.csv")
 title = "Sequential+parallel__expanded_kernel,HALO=4"
 plt.title(title)
 plt.plot(points1, color= "b")
 plt.plot(points2, color= "r")
-plt.legend(["Sequential", "Parallel"])
+plt.legend(["Sequential", "Parallel, n=2"])
 time = strftime("%Y-%m-%d-%H-%M-%S", gmtime())
-plt.savefig("figures/"+title+"__"+time)
+#plt.savefig("figures/"+title+"__"+time)
 plt.show()
             

@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define HALO 1
+#define HALO 4
 
 #define HNx (Nx+2*HALO)
 #define HNy (Ny+2*HALO)

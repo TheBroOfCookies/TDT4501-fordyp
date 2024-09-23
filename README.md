@@ -19,10 +19,10 @@ Runs a 64x64x64 point grid with 500 timesteps and sourcetype 1 and 4 processes
 
 ### Notes
 S - Stress
-SXX stress double derivative mhp X
+SXX stress double derivative with regards to X
 
-Current MPI implementation divides problem space on Z-coordinates
-Current MPI implementation only works for saving recievers for problem size = 64x64x64
+Current MPI implementation divides problem space on Z-coordinates  
+Current MPI implementation only works for saving recievers for problem size = 64x64x64  
 Nz = 1024 no longer supported for save recievers
 
 ### Commands list

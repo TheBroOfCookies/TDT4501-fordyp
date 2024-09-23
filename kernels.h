@@ -37,6 +37,14 @@
 
 #define FDD(dst,src,krn) do {                                   \
     WIPE_METHOD(dst);                                           \
+    for ( int_t k=HALF-HALO; k<HNz-HALF; k++ )                        \
+        for ( int_t j=HALF-HALO; j<HNy-HALF; j++ )                    \
+            for ( int_t i=HALF-HALO; i<HNx-HALF; i++ )                \
+                krn(dst,src);                                   \
+} while ( false )
+
+#define FDD_old(dst,src,krn) do {                               \
+    WIPE_METHOD(dst);                                           \
     for ( int_t k=HALF; k<Nz-HALF; k++ )                        \
         for ( int_t j=HALF; j<Ny-HALF; j++ )                    \
             for ( int_t i=HALF; i<Nx-HALF; i++ )                \
