@@ -79,7 +79,6 @@ main ( int argc, char **argv )
     
 
     // MPI setup
-
     MPI_Init (&argc, &argv);
 
     MPI_Comm_rank ( MPI_COMM_WORLD, &rank );
@@ -112,11 +111,11 @@ main ( int argc, char **argv )
         case 3:   source_type=F_DIP; break;
     }
 
-    Nx = tNx;   //simple x decomposition
+    Nx = tNx;   // tNx = total number of pints in x direction
     Ny = tNy;
-    Nz = tNz/size;
+    Nz = tNz/size;   //only local Nz is different from global tNz
 
-    maxz = (rank+1)*Nz-1;
+    maxz = (rank+1)*Nz-1;  //max global z-coordiante for this rank
     minz = rank*Nz;
     printf("Minz %ld, maxz %ld, rank %d\n", minz, maxz, rank);
 
@@ -128,8 +127,8 @@ main ( int argc, char **argv )
     /* Source coordinates: initialized here b/c not constant with
      * different domain sizes
      */
-    source_x = HNx/2, source_y = HNy/2, source_z = (tNz+2*HALO)/2;
     //source_x = HNx/2, source_y = HNy/2, source_z = HNz/2;
+    source_x = HNx/2, source_y = HNy/2, source_z = (tNz+2*HALO)/2;
     source = malloc ( Nt * sizeof(real_t) );
     for ( int_t t=0; t<Nt; t++ )
     {
@@ -143,7 +142,7 @@ main ( int argc, char **argv )
     int_t nrecvs;
     switch ( tNz )
     {
-        case 32:   nrecvs = 4;  break;
+        case 32:   nrecvs = 4;  break;  //only used for debugging reciever placements in parallel version
         case 64:   nrecvs = 8;  break;
         case 128:  nrecvs = 16; break;
         case 256:  nrecvs = 24; break;
@@ -155,15 +154,16 @@ main ( int argc, char **argv )
             );
             break;
     }
+
     /* START Parallel section for saving recievers*/
     if(size > 1) {
 
-        if (tNz != 64) {
+        if (tNz != 64) { //only 64x64x64 currently supported for saving recievers with MPI ranks
             fprintf( stderr, "\nTotal number of gridpoints in Z-direction must be 64 to support SAVE_RECIEVERS and MPI parallelizaiton.\n" );
             exit(1);
         }
         
-        for ( int_t r=0; r<size; r++ ) {
+        for ( int_t r=0; r<size; r++ ) {  //Determining which ranks wille have the recievers for 64x64x64
             int_t lmaxz = (r+1)*Nz-1;
             int_t lminz = r*Nz;
             if(lmaxz >= 52 && lminz <= 52) {
@@ -175,12 +175,12 @@ main ( int argc, char **argv )
                 rcv0_min = lminz;
             }
         }
-        //nrecvs = nrecvs/2;  //Currently using nrecvs = 8 to collect all data points in one rank
         if (rank == rcv0_rank || rank == rcv1_rank){
             printf("Rank %d deisgnated reciever\n", rank);
             receiver_init ( recv, nrecvs, false, true, true, true );
             receiver_setup ( recv );
         } /* END Parallel section for saving recievers*/
+        
     } else {
         printf("measure points %ld, %ld\n", source_z-20, source_z+20);
         receiver_init ( recv, nrecvs, false, true, true, true );
@@ -203,15 +203,16 @@ main ( int argc, char **argv )
     }
     gettimeofday ( &t_end, NULL );
 
+
+    double elapsed_time = WALLTIME(t_end) - WALLTIME(t_start);
 #ifdef SAVE_RECEIVERS
     if(size > 1){
-        receiver_write_MPI ( recv );
+        receiver_write_MPI ( recv, elapsed_time );
     } else {
-        receiver_write ( recv );
+        receiver_write ( recv, elapsed_time );
     }
 #endif
-
-    if (rank==0){config_print (WALLTIME(t_end) - WALLTIME(t_start) );}
+    if (rank==0){config_print (elapsed_time );}
 
     mesh_destroy ( mesh );
     model_destroy ( model );
@@ -234,11 +235,9 @@ insert_source ( int_t ts, source_t type )
     int_t z=source_z, y=source_y, x=source_x;
     real_t s = source[ts];
     // Determine source type, act accordingly
+    // Determine correct rank for force application
     if (z < minz || z > maxz+HALO) { return; }
     z = z - (minz);
-    //if (rank == rcv0_rank) z = 33;
-    //if (rank == rcv1_rank) z = 1; 
-    //printf("z %ld\n", z);
     switch ( type )
     {
         case STRESS:
@@ -421,7 +420,7 @@ time_step ( int_t ts )
 void
 border_exchange_all ( void )
 {
-
+    //border exchanged used for HALO = 1
     border_exchange(&VX(HNz-2,0,0), &VX(HNz-1,0,0), &VX(1,0,0), &VX(0,0,0));
     border_exchange(&VY(HNz-2,0,0), &VY(HNz-1,0,0), &VY(1,0,0), &VY(0,0,0));
     border_exchange(&VZ(HNz-2,0,0), &VZ(HNz-1,0,0), &VZ(1,0,0), &VZ(0,0,0));
@@ -434,8 +433,8 @@ border_exchange_all ( void )
     border_exchange(&SYZ(HNz-2,0,0), &SYZ(HNz-1,0,0), &SYZ(1,0,0), &SYZ(0,0,0));
     border_exchange(&SXZ(HNz-2,0,0), &SXZ(HNz-1,0,0), &SXZ(1,0,0), &SXZ(0,0,0));
 
-/* 
-    border_exchange(&VX(HNz-2*HALO,0,0), &VX(HNz-HALO,0,0), &VX(HALO,0,0), &VX(0,0,0));
+    // generalized border exchange for variable HALO size
+/*     border_exchange(&VX(HNz-2*HALO,0,0), &VX(HNz-HALO,0,0), &VX(HALO,0,0), &VX(0,0,0));
     border_exchange(&VY(HNz-2*HALO,0,0), &VY(HNz-HALO,0,0), &VY(HALO,0,0), &VY(0,0,0));
     border_exchange(&VZ(HNz-2*HALO,0,0), &VZ(HNz-HALO,0,0), &VZ(HALO,0,0), &VZ(0,0,0));
 
@@ -604,7 +603,6 @@ receiver_setup ( receiver_t *recv )
             recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z+20 - minz;
         }
         if (rcv0_rank == rank) {
-            //int_t offset = 12 + HALO;
             printf("%ld rank %d\n", z-20 - minz, rank);
             recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z-20 - minz;   //actual z[4]
             recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z-20 - minz;   //actual z[5]
@@ -736,15 +734,16 @@ receiver_save_MPI ( int_t ts, receiver_t *recv )
 }
 
 void
-receiver_write_MPI ( receiver_t *recv )
+receiver_write_MPI ( receiver_t *recv, double elapsed_time )
 {
     if (rank != rcv1_rank) {
         return;
     }
     
     FILE *out = fopen ( "receivers_mpi.csv", "w" );
-
-    fprintf ( out, "%ld\n%ld\n", recv->n, Nt );
+    fprintf( out, "%d,%lf\n", size, elapsed_time);
+    fprintf ( out, "%ld,%d,%ld\t", recv->n, HALO, Nt );
+    fprintf( out, "%ld,%ld,%ld\n", tNx, tNy, tNz);
     for ( int_t r=0; r<recv->n; r++ )
     {
         if ( recv->p )
@@ -779,10 +778,12 @@ receiver_write_MPI ( receiver_t *recv )
 
 
 void
-receiver_write ( receiver_t *recv )
+receiver_write ( receiver_t *recv, double elapsed_time )
 {
     FILE *out = fopen ( "receivers.csv", "w" );
-    fprintf ( out, "%ld\n%ld\n", recv->n, Nt );
+    fprintf( out, "1,%lf\n", elapsed_time);
+    fprintf ( out, "%ld,%d,%ld\t", recv->n, HALO, Nt );
+    fprintf( out, "%ld,%ld,%ld\n", tNx, tNy, tNz);
     for ( int_t r=0; r<recv->n; r++ )
     {
         if ( recv->p )
