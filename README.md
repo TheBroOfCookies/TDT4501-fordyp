@@ -1,28 +1,22 @@
 ## Run
 ```
-mpirun -np 4 ./main_mpi 64 64 64 500 1
+mpirun -np 2 ./main_mpi 64 64 64 500 1
 ```
-Runs a 64x64x64 point grid with 500 timesteps and sourcetype 1 and 4 processes
-
-
-
-
+Runs a 64x64x64 point grid with 500 timesteps and sourcetype 1 and 2 processes  
+Maximum 2 ranks with -DSAVE_RECEIVERS=ON (set in makefile, default ON)
+Maximum 4 ranks with -DSAVE_RECEIVERS=OFF 
 
 ### Sourcetypes
 1 = Stress monopole  
 2 = Force monopole  
 3 = Force dipole
 
-
-
-
-
 ### Notes
 S - Stress
 SXX stress double derivative with regards to X
 
-Current MPI implementation divides problem space on Z-coordinates  
-Current MPI implementation only works for saving recievers for problem size = 64x64x64  
+MPI implementation divides problem space on Z-coordinates  
+MPI implementation only works for saving recievers for problem size = 64x64x64  
 Nz = 1024 no longer supported for save recievers
 
 ### Commands list
