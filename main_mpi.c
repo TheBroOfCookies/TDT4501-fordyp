@@ -20,7 +20,7 @@ void options ( int argc, char **argv );
 void config_print ( double elapsed_time );
 void time_step ( int_t iteration );
 void border_exchange_all ( void );
-void border_exchange ( real_t *startS, real_t *startR, real_t *endS, real_t *endR );
+void border_exchange_2d ( real_t *startS, real_t *startR, real_t *endS, real_t *endR );
 void insert_source ( int_t ts, source_t type );
 
 /* Weight coefficients, inner diff. loop */
@@ -142,7 +142,6 @@ main ( int argc, char **argv )
     int_t nrecvs;
     switch ( tNz )
     {
-        case 32:   nrecvs = 4;  break;  //only used for debugging reciever placements in parallel version
         case 64:   nrecvs = 8;  break;
         case 128:  nrecvs = 16; break;
         case 256:  nrecvs = 24; break;
@@ -420,36 +419,24 @@ time_step ( int_t ts )
 void
 border_exchange_all ( void )
 {
-/*     //border exchanged used for HALO = 1
-    border_exchange(&VX(HNz-2,0,0), &VX(HNz-1,0,0), &VX(1,0,0), &VX(0,0,0));
-    border_exchange(&VY(HNz-2,0,0), &VY(HNz-1,0,0), &VY(1,0,0), &VY(0,0,0));
-    border_exchange(&VZ(HNz-2,0,0), &VZ(HNz-1,0,0), &VZ(1,0,0), &VZ(0,0,0));
 
-    border_exchange(&SXX(HNz-2,0,0), &SXX(HNz-1,0,0), &SXX(1,0,0), &SXX(0,0,0));
-    border_exchange(&SYY(HNz-2,0,0), &SYY(HNz-1,0,0), &SYY(1,0,0), &SYY(0,0,0));
-    border_exchange(&SZZ(HNz-2,0,0), &SZZ(HNz-1,0,0), &SZZ(1,0,0), &SZZ(0,0,0));
-
-    border_exchange(&SXY(HNz-2,0,0), &SXY(HNz-1,0,0), &SXY(1,0,0), &SXY(0,0,0));
-    border_exchange(&SYZ(HNz-2,0,0), &SYZ(HNz-1,0,0), &SYZ(1,0,0), &SYZ(0,0,0));
-    border_exchange(&SXZ(HNz-2,0,0), &SXZ(HNz-1,0,0), &SXZ(1,0,0), &SXZ(0,0,0));
- */
     // generalized border exchange for variable HALO size
-    border_exchange(&VX(HNz-2*HALO,0,0), &VX(HNz-HALO,0,0), &VX(HALO,0,0), &VX(0,0,0));
-    border_exchange(&VY(HNz-2*HALO,0,0), &VY(HNz-HALO,0,0), &VY(HALO,0,0), &VY(0,0,0));
-    border_exchange(&VZ(HNz-2*HALO,0,0), &VZ(HNz-HALO,0,0), &VZ(HALO,0,0), &VZ(0,0,0));
+    border_exchange_2d(&VX(HNz-2*HALO,0,0), &VX(HNz-HALO,0,0), &VX(HALO,0,0), &VX(0,0,0));
+    border_exchange_2d(&VY(HNz-2*HALO,0,0), &VY(HNz-HALO,0,0), &VY(HALO,0,0), &VY(0,0,0));
+    border_exchange_2d(&VZ(HNz-2*HALO,0,0), &VZ(HNz-HALO,0,0), &VZ(HALO,0,0), &VZ(0,0,0));
 
-    border_exchange(&SXX(HNz-2*HALO,0,0), &SXX(HNz-HALO,0,0), &SXX(HALO,0,0), &SXX(0,0,0));
-    border_exchange(&SYY(HNz-2*HALO,0,0), &SYY(HNz-HALO,0,0), &SYY(HALO,0,0), &SYY(0,0,0));
-    border_exchange(&SZZ(HNz-2*HALO,0,0), &SZZ(HNz-HALO,0,0), &SZZ(HALO,0,0), &SZZ(0,0,0));
+    border_exchange_2d(&SXX(HNz-2*HALO,0,0), &SXX(HNz-HALO,0,0), &SXX(HALO,0,0), &SXX(0,0,0));
+    border_exchange_2d(&SYY(HNz-2*HALO,0,0), &SYY(HNz-HALO,0,0), &SYY(HALO,0,0), &SYY(0,0,0));
+    border_exchange_2d(&SZZ(HNz-2*HALO,0,0), &SZZ(HNz-HALO,0,0), &SZZ(HALO,0,0), &SZZ(0,0,0));
 
-    border_exchange(&SXY(HNz-2*HALO,0,0), &SXY(HNz-HALO,0,0), &SXY(HALO,0,0), &SXY(0,0,0));
-    border_exchange(&SYZ(HNz-2*HALO,0,0), &SYZ(HNz-HALO,0,0), &SYZ(HALO,0,0), &SYZ(0,0,0));
-    border_exchange(&SXZ(HNz-2*HALO,0,0), &SXZ(HNz-HALO,0,0), &SXZ(HALO,0,0), &SXZ(0,0,0));
+    border_exchange_2d(&SXY(HNz-2*HALO,0,0), &SXY(HNz-HALO,0,0), &SXY(HALO,0,0), &SXY(0,0,0));
+    border_exchange_2d(&SYZ(HNz-2*HALO,0,0), &SYZ(HNz-HALO,0,0), &SYZ(HALO,0,0), &SYZ(0,0,0));
+    border_exchange_2d(&SXZ(HNz-2*HALO,0,0), &SXZ(HNz-HALO,0,0), &SXZ(HALO,0,0), &SXZ(0,0,0));
 
 
 }
 void
-border_exchange ( real_t *upSnd, real_t *upRcv, real_t *downSnd, real_t *downRcv )
+border_exchange_2d ( real_t *upSnd, real_t *upRcv, real_t *downSnd, real_t *downRcv )
 {
     // Exchange border for each valid array
     int count = HNx*HNy*HALO; 
@@ -618,16 +605,6 @@ receiver_setup ( receiver_t *recv )
      */
     switch ( Nz )
     {
-        case 1024:
-            recv->x[32] = x+400, recv->y[32] = y+400, recv->z[32] = z+400;
-            recv->x[33] = x-400, recv->y[33] = y+400, recv->z[33] = z+400;
-            recv->x[34] = x-400, recv->y[34] = y-400, recv->z[34] = z+400;
-            recv->x[35] = x+400, recv->y[35] = y-400, recv->z[35] = z+400;
-            recv->x[36] = x+400, recv->y[36] = y+400, recv->z[36] = z-400;
-            recv->x[37] = x-400, recv->y[37] = y+400, recv->z[37] = z-400;
-            recv->x[38] = x-400, recv->y[38] = y-400, recv->z[38] = z-400;
-            recv->x[39] = x+400, recv->y[39] = y-400, recv->z[39] = z-400;
-            // Falls through
         case 512:
             recv->x[24] = x+200, recv->y[24] = y+200, recv->z[24] = z+200;
             recv->x[25] = x-200, recv->y[25] = y+200, recv->z[25] = z+200;
@@ -668,12 +645,6 @@ receiver_setup ( receiver_t *recv )
             recv->x[6] = x-20, recv->y[6] = y-20, recv->z[6] = z-20;
             recv->x[7] = x+20, recv->y[7] = y-20, recv->z[7] = z-20;
             break;
-        case 32:
-            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = 13;    //left = 13
-            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = 13;    //right = 21
-            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = 13;
-            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = 13;
-            break;
     }
 }
 
@@ -700,79 +671,44 @@ receiver_save ( int_t ts, receiver_t *recv )
 void
 receiver_save_MPI ( int_t ts, receiver_t *recv )
 {
-    for ( int_t r=0; r<recv->n/2; r++ ) {
+    for ( int_t r=0; r<recv->n/size; r++ ) {
         int_t k = recv->z[r], j = recv->y[r], i = recv->x[r];
-        if (rank == rcv1_rank) {
-            recv->vx[r*Nt+ts] = VX(k,j,i);
-            recv->vy[r*Nt+ts] = VY(k,j,i);
-            recv->vz[r*Nt+ts] = VZ(k,j,i);
-        } 
-        if (rank == rcv0_rank) {
-            recv->vx[r*Nt+ts] = VX(k,j,i);
-            recv->vy[r*Nt+ts] = VY(k,j,i);
-            recv->vz[r*Nt+ts] = VZ(k,j,i);
-        } 
+        recv->vx[r*Nt+ts] = VX(k,j,i);
+        recv->vy[r*Nt+ts] = VY(k,j,i);
+        recv->vz[r*Nt+ts] = VZ(k,j,i);
     }
-
-    for ( int_t r=0; r<recv->n/2; r++ ) {
-        if (rank == rcv0_rank) {
-            real_t buf[3];
-            buf[0] = recv->vx[r*Nt+ts];
-            buf[1] = recv->vy[r*Nt+ts];
-            buf[2] = recv->vz[r*Nt+ts];
-            MPI_Send(&buf[0], 3, MPI_FLOAT, rcv1_rank, r, MPI_COMM_WORLD);
-        }
-        if (rank == rcv1_rank) {
-            real_t buf[3];
-            MPI_Recv(&buf[0], 3, MPI_FLOAT, rcv0_rank, r, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            recv->vx[(r+recv->n/2)*Nt+ts] = buf[0];
-            recv->vy[(r+recv->n/2)*Nt+ts] = buf[1];
-            recv->vz[(r+recv->n/2)*Nt+ts] = buf[2];
-        } 
-    }
-
 }
 
 void
 receiver_write_MPI ( receiver_t *recv, double elapsed_time )
 {
-    if (rank != rcv1_rank) {
-        return;
+    for (int r = 0; r < size; r++){
+        if (rank != r) {
+            MPI_Barrier(MPI_COMM_WORLD);
+        } else {
+            char filename[50];
+            sprintf(filename, "receivers_mpi%d.csv", r);
+            FILE *out = fopen ( filename, "w" );
+            fprintf( out, "%d,%lf\n", size, elapsed_time);
+            fprintf ( out, "%ld,%d,%ld\t", recv->n, HALO, Nt );
+            fprintf( out, "%ld,%ld,%ld\n", tNx, tNy, tNz);
+            for ( int_t r=0; r<recv->n/size; r++ )
+            {
+                fprintf ( out, "Vx\n" );
+                for ( int_t t=0; t<Nt; t++ )
+                    fprintf ( out, "%e\n", recv->vx[r*Nt+t] );
+                fprintf ( out, "Vy\n" );
+                for ( int_t t=0; t<Nt; t++ )
+                    fprintf ( out, "%e\n", recv->vy[r*Nt+t] );
+                fprintf ( out, "Vz\n" );
+                for ( int_t t=0; t<Nt; t++ )
+                    fprintf ( out, "%e\n", recv->vz[r*Nt+t] );
+                fprintf ( out, "\n" );
+            }
+            fclose ( out );
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
     }
-    
-    FILE *out = fopen ( "receivers_mpi.csv", "w" );
-    fprintf( out, "%d,%lf\n", size, elapsed_time);
-    fprintf ( out, "%ld,%d,%ld\t", recv->n, HALO, Nt );
-    fprintf( out, "%ld,%ld,%ld\n", tNx, tNy, tNz);
-    for ( int_t r=0; r<recv->n; r++ )
-    {
-        if ( recv->p )
-        {
-            fprintf ( out, "P\n" );
-            for ( int_t t=0; t<Nt; t++ )
-                fprintf ( out, "%e\n", recv->p[r*Nt+t] );
-        }
-        if ( recv->vx )
-        {
-            fprintf ( out, "Vx\n" );
-            for ( int_t t=0; t<Nt; t++ )
-                fprintf ( out, "%e\n", recv->vx[r*Nt+t] );
-        }
-        if ( recv->vy )
-        {
-            fprintf ( out, "Vy\n" );
-            for ( int_t t=0; t<Nt; t++ )
-                fprintf ( out, "%e\n", recv->vy[r*Nt+t] );
-        }
-        if ( recv->vz )
-        {
-            fprintf ( out, "Vz\n" );
-            for ( int_t t=0; t<Nt; t++ )
-                fprintf ( out, "%e\n", recv->vz[r*Nt+t] );
-        }
-        fprintf ( out, "\n" );
-    }
-    fclose ( out );
     return;
 }
 
