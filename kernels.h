@@ -35,7 +35,7 @@
                 dst(k,j,i) *= (1.0 / kDz);                                  \
 } while ( false )
 
-#define FDD(dst,src,krn) do {                                   \
+#define FDD_new(dst,src,krn) do {                                   \
     WIPE_METHOD(dst);                                           \
     for ( int_t k=HALF-HALO; k<HNz-HALF; k++ )                        \
         for ( int_t j=HALF-HALO; j<HNy-HALF; j++ )                    \
@@ -43,7 +43,7 @@
                 krn(dst,src);                                   \
 } while ( false )
 
-#define FDD_old(dst,src,krn) do {                               \
+#define FDD(dst,src,krn) do {                               \
     WIPE_METHOD(dst);                                           \
     for ( int_t k=HALF; k<Nz-HALF; k++ )                        \
         for ( int_t j=HALF; j<Ny-HALF; j++ )                    \
