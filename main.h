@@ -7,6 +7,10 @@
 #define HNy (Ny+2*HALO)
 #define HNz (Nz+2*HALO)
 
+#define TNx (tNx+2*HALO)
+#define TNy (tNy+2*HALO)
+#define TNz (tNz+2*HALO)
+
 // Model indexing macros
 #define INPUT(z,y,x) (model->rho[(z)*Ny*Nx+(y)*Nx+(x)])
 #define RHO(z,y,x) (model->rho[(z)*HNy*HNx+(y)*HNx+(x)])
@@ -123,7 +127,7 @@ typedef struct {
 void receiver_init (
     receiver_t *recv, int_t n, bool press, bool vel_x, bool vel_y, bool vel_z
 );
-void receiver_setup ( receiver_t *recv );
+void receiver_setup ( receiver_t *recv, int_t nrecevs );
 void receiver_save ( int_t ts, receiver_t *recv );
 void receiver_write ( receiver_t *recv, double elapsed_time );
 void receiver_destroy ( receiver_t *recv );

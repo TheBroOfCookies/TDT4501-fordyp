@@ -23,24 +23,30 @@ void border_exchange_all ( void );
 void border_exchange_2d ( real_t *startS, real_t *startR, real_t *endS, real_t *endR );
 void insert_source ( int_t ts, source_t type );
 
+int_t point_to_rank(int_t x, int_t y, int_t z);
+void allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_t nrecvs );
+
 /* Weight coefficients, inner diff. loop */
 #define HALF 8
 const real_t W[HALF] = {1.2627, -0.1312, 0.0412, -0.0170, 0.0076, -0.0034, 0.0014, -0.0005};                 
 
 /* Simulation parameters */
 int_t
-    Nx=0, Ny=0, Nz=0, Nt=0, st=0;
-
-int_t
+    Nx=0, Ny=0, Nz=0, Nt=0, st=0,
     tNx=0, tNy=0, tNz=0;
 
 int
     rank, size,
-    rcv1_rank, rcv0_rank;
+    n_dims = 3, cart_dims[3], cart_coords[3];
 
 int_t
     rcv0_min, rcv1_min,
-    maxz, minz;
+    max_x, min_x,
+    max_y, min_y,
+    max_z, min_z;
+
+MPI_Comm
+    cart_com;
 
 
 source_t
@@ -67,6 +73,8 @@ real_t *source; // Depends on interation count
 model_t *model __attribute__((aligned(64))) = NULL;
 mesh_t *mesh = NULL;
 receiver_t *recv = NULL;
+int_t *recv_to_rank = NULL;
+int_t *points_per_rank = NULL;
 
 
 /* Main setup & loop */
@@ -110,15 +118,46 @@ main ( int argc, char **argv )
         case 2: source_type=F_MONOP; break;
         case 3:   source_type=F_DIP; break;
     }
+    int_t rest = size;
+    int_t division_z = 1;
+    int_t division_y = 1;
+    int_t division_x = 1;
+    while (rest != 1) {
+        division_z = division_z*2;
+        rest = rest/2;
+        if (rest == 1) break;
+        division_y = division_y*2;
+        rest = rest/2;
+        if (rest == 1) break;
+        division_x = division_x*2;
+        rest = rest/2;
+    }
+    Nx = tNx/division_x;   // tNx = total number of pints in x direction
+    Ny = tNy/division_y;
+    Nz = tNz/division_z;   //only local Nz is different from global tNz
+    
+    if (rank == 0) {
+        printf("In total: tNx %ld tNy %ld tNz %ld\n", tNx, tNy, tNz);
+        printf("Per rank:  Nx %ld  Ny %ld  Nz %ld\n",Nx, Ny, Nz);
+    }
 
-    Nx = tNx;   // tNx = total number of pints in x direction
-    Ny = tNy;
-    Nz = tNz/size;   //only local Nz is different from global tNz
+    MPI_Dims_create ( size, n_dims, cart_dims );
+    MPI_Cart_create ( MPI_COMM_WORLD, n_dims, cart_dims, (int[3]){0,0,0}, 0, &cart_com );
 
-    maxz = (rank+1)*Nz-1;  //max global z-coordiante for this rank
-    minz = rank*Nz;
-    printf("Minz %ld, maxz %ld, rank %d\n", minz, maxz, rank);
+    MPI_Comm_rank ( cart_com, &rank );
+    MPI_Cart_coords ( cart_com, rank, n_dims, cart_coords );
 
+    //max and min global coordiantes for this rank
+    min_x = cart_coords[2]*Nx;
+    max_x = (cart_coords[2]+1)*Nx-1;  
+    min_y = cart_coords[1]*Ny;
+    max_y = (cart_coords[1]+1)*Ny-1;  
+    min_z = cart_coords[0]*Nz;
+    max_z = (cart_coords[0]+1)*Nz-1;  
+
+    if (rank == 0) printf("Rank\tmin_x\tmax_x\tmin_y\tmax_y\tmin_z\tmax_z\n");
+    else sleep(1);
+    printf("%d\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n", rank, min_x, max_x, min_y, max_y, min_z, max_z);
     
     
 
@@ -127,8 +166,8 @@ main ( int argc, char **argv )
     /* Source coordinates: initialized here b/c not constant with
      * different domain sizes
      */
-    //source_x = HNx/2, source_y = HNy/2, source_z = HNz/2;
-    source_x = HNx/2, source_y = HNy/2, source_z = (tNz+2*HALO)/2;
+    source_x = TNx/2, source_y = TNy/2, source_z = TNz/2;
+
     source = malloc ( Nt * sizeof(real_t) );
     for ( int_t t=0; t<Nt; t++ )
     {
@@ -156,34 +195,35 @@ main ( int argc, char **argv )
 
     /* START Parallel section for saving recievers*/
     if(size > 1) {
-
         if (tNz != 64) { //only 64x64x64 currently supported for saving recievers with MPI ranks
             fprintf( stderr, "\nTotal number of gridpoints in Z-direction must be 64 to support SAVE_RECIEVERS and MPI parallelizaiton.\n" );
             exit(1);
         }
-        
-        for ( int_t r=0; r<size; r++ ) {  //Determining which ranks wille have the recievers for 64x64x64
-            int_t lmaxz = (r+1)*Nz-1;
-            int_t lminz = r*Nz;
-            if(lmaxz >= 52 && lminz <= 52) {
-                rcv1_rank = r;
-                rcv1_min = lminz;
-            }
-            if(lmaxz >= 12 && lminz <= 12) {
-                rcv0_rank = r;
-                rcv0_min = lminz;
-            }
+        MPI_Barrier(cart_com);
+        sleep(1);
+        recv_to_rank = malloc(sizeof(int_t)*nrecvs);
+        points_per_rank = calloc(size, sizeof(int_t));
+        allocate_receivers( recv_to_rank, points_per_rank, nrecvs);
+        if (rank == 0) printf("Receiver point -> rank\n");
+        for (int_t i = 0; i < nrecvs; i++) {
+            if (rank == 0) printf("%ld->%ld\t", i, recv_to_rank[i]);
         }
-        if (rank == rcv0_rank || rank == rcv1_rank){
-            printf("Rank %d deisgnated reciever\n", rank);
-            receiver_init ( recv, nrecvs, false, true, true, true );
-            receiver_setup ( recv );
-        } /* END Parallel section for saving recievers*/
+        if (rank == 0) printf("\n");
+        if (rank == 0) printf("Rank -> number of receiver points\n");
+        for (int_t i = 0; i < size; i++) {
+            if (rank == 0) printf("%ld->%ld\t", i, points_per_rank[i]);
+        }
+        if (rank == 0) printf("\n");
+
+        receiver_init ( recv, nrecvs/size, false, true, true, true );
+        receiver_setup ( recv, nrecvs );
+        
+        /* END Parallel section for saving recievers*/
         
     } else {
         printf("measure points %ld, %ld\n", source_z-20, source_z+20);
         receiver_init ( recv, nrecvs, false, true, true, true );
-        receiver_setup ( recv );
+        receiver_setup ( recv, nrecvs );
     }
 #endif
 
@@ -193,11 +233,10 @@ main ( int argc, char **argv )
     mesh_init ( mesh );
     model_set_uniform ( model );
     
-    printf("Completed setup for Rank %d\n", rank);
     struct timeval t_start, t_end;
     gettimeofday ( &t_start, NULL );
     for ( int_t t=0; t<Nt; t++ ) {
-        if(size > 1) border_exchange_all();
+        //if(size > 1) border_exchange_all();
         time_step ( t );
     }
     gettimeofday ( &t_end, NULL );
@@ -211,7 +250,7 @@ main ( int argc, char **argv )
         receiver_write ( recv, elapsed_time );
     }
 #endif
-    if (rank==0){config_print (elapsed_time );}
+    if (rank==0) config_print (elapsed_time );
 
     mesh_destroy ( mesh );
     model_destroy ( model );
@@ -226,6 +265,64 @@ main ( int argc, char **argv )
     exit ( EXIT_SUCCESS );
 }
 
+int_t 
+point_to_rank(int_t x, int_t y, int_t z) 
+{
+
+}
+
+void
+allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_t nrecvs)
+{
+    int_t z=source_z, y=source_y, x=source_x;
+    for ( int_t r=0; r<size; r++ ) {  //Determining which ranks will have the recievers for 64x64x64
+        int r_coords[3];
+        MPI_Cart_coords ( cart_com, r, n_dims, r_coords );
+        int_t r_min_x = r_coords[2]*Nx;
+        int_t r_max_x = (r_coords[2]+1)*Nx-1;
+        int_t r_min_y = r_coords[1]*Ny;
+        int_t r_max_y = (r_coords[1]+1)*Ny-1;
+        int_t r_min_z = r_coords[0]*Nz;
+        int_t r_max_z = (r_coords[0]+1)*Nz-1;
+        if(r_max_z >= z+20 && r_min_z <= z+20) {
+            if(r_max_y >= y+20 && r_min_y <= y+20) {
+                if(r_max_x >= x+20 && r_min_x <= x+20) {
+                    receivers_to_rank[0] = r; //recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z+20;
+                    recv_points_per_rank[r]++;
+                } if(r_max_x >= x-20 && r_min_x <= x-20) {
+                    receivers_to_rank[1] = r; //recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z+20;
+                    recv_points_per_rank[r]++;
+                }
+            } if(r_max_y >= y-20 && r_min_y <= y-20) {
+                if(r_max_x >= x-20 && r_min_x <= x-20) {
+                    receivers_to_rank[2] = r; //recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = z+20;
+                    recv_points_per_rank[r]++;
+                } if(r_max_x >= x+20 && r_min_x <= x+20) {
+                    receivers_to_rank[3] = r; //recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z+20;
+                    recv_points_per_rank[r]++;
+                }
+            }
+        } if(r_max_z >= z-20 && r_min_z <= z-20) {
+            if(r_max_y >= y+20 && r_min_y <= y+20) {
+                if(r_max_x >= x+20 && r_min_x <= x+20) {
+                    receivers_to_rank[4] = r; //recv->x[4] = x+20, recv->y[4] = y+20, recv->z[4] = z-20;
+                    recv_points_per_rank[r]++;
+                } if(r_max_x >= x-20 && r_min_x <= x-20) {
+                    receivers_to_rank[5] = r; //recv->x[5] = x-20, recv->y[5] = y+20, recv->z[5] = z-20;
+                    recv_points_per_rank[r]++;
+                }
+            } if(r_max_y >= y-20 && r_min_y <= y-20) {
+                if(r_max_x >= x-20 && r_min_x <= x-20) {
+                    receivers_to_rank[6] = r; //recv->x[6] = x-20, recv->y[6] = y-20, recv->z[6] = z-20;
+                    recv_points_per_rank[r]++;
+                } if(r_max_x >= x+20 && r_min_x <= x+20) {
+                    receivers_to_rank[7] = r; //recv->x[7] = x+20, recv->y[7] = y-20, recv->z[7] = z-20;
+                    recv_points_per_rank[r]++;
+                }
+            }
+        }
+    }
+}
 
 void
 insert_source ( int_t ts, source_t type )
@@ -235,8 +332,13 @@ insert_source ( int_t ts, source_t type )
     real_t s = source[ts];
     // Determine source type, act accordingly
     // Determine correct rank for force application
-    if (z < minz || z > maxz+HALO) { return; }
-    z = z - (minz);
+    if (x < min_x || x > max_x+HALO) return;
+    if (y < min_y || y > max_y+HALO) return;
+    if (z < min_z || z > max_z+HALO) return; 
+    //adjust global coord to local coord
+    x = x - (min_x);
+    y = y - (min_y);
+    z = z - (min_z);
     switch ( type )
     {
         case STRESS:
@@ -574,7 +676,7 @@ receiver_init ( receiver_t *recv, int_t n, bool p, bool vx, bool vy, bool vz )
 
 
 void
-receiver_setup ( receiver_t *recv )
+receiver_setup ( receiver_t *recv, int_t nrecvs )
 {
     // In case setup doesn't have a config for Nz
     if ( recv->n == 0 )
@@ -582,20 +684,23 @@ receiver_setup ( receiver_t *recv )
     // Convenience aliases
     int_t x=source_x, y=source_y, z=source_z;
     if(size > 1) {
-        if (rcv1_rank == rank) {
-            printf("%ld rank %d\n", z+20 - minz, rank);
-            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z+20 - minz;
-            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z+20 - minz;
-            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = z+20 - minz;
-            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z+20 - minz;
+        for (int_t r = 0; r < size; r++){
+            return;
+        }
+        /* if (rcv1_rank == rank) {
+            printf("%ld rank %d\n", z+20 - min_z, rank);
+            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z+20 - min_z;
+            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z+20 - min_z;
+            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = z+20 - min_z;
+            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z+20 - min_z;
         }
         if (rcv0_rank == rank) {
-            printf("%ld rank %d\n", z-20 - minz, rank);
-            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z-20 - minz;   //actual z[4]
-            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z-20 - minz;   //actual z[5]
-            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = z-20 - minz;   //actual z[6]
-            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z-20 - minz;   //actual z[7]
-        }
+            printf("%ld rank %d\n", z-20 - min_z, rank);
+            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z-20 - min_z;   //actual z[4]
+            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z-20 - min_z;   //actual z[5]
+            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = z-20 - min_z;   //actual z[6]
+            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z-20 - min_z;   //actual z[7]
+        } */
         return;
     }
 
@@ -684,7 +789,7 @@ receiver_write_MPI ( receiver_t *recv, double elapsed_time )
 {
     for (int r = 0; r < size; r++){
         if (rank != r) {
-            MPI_Barrier(MPI_COMM_WORLD);
+            MPI_Barrier(cart_com);
         } else {
             char filename[50];
             sprintf(filename, "receivers_mpi%d.csv", r);
@@ -692,6 +797,8 @@ receiver_write_MPI ( receiver_t *recv, double elapsed_time )
             fprintf( out, "%d,%lf\n", size, elapsed_time);
             fprintf ( out, "%ld,%d,%ld\t", recv->n, HALO, Nt );
             fprintf( out, "%ld,%ld,%ld\n", tNx, tNy, tNz);
+            fprintf( out, "%d,%d,%d\n", rank, rank, rank);
+            /* 
             for ( int_t r=0; r<recv->n/size; r++ )
             {
                 fprintf ( out, "Vx\n" );
@@ -704,9 +811,9 @@ receiver_write_MPI ( receiver_t *recv, double elapsed_time )
                 for ( int_t t=0; t<Nt; t++ )
                     fprintf ( out, "%e\n", recv->vz[r*Nt+t] );
                 fprintf ( out, "\n" );
-            }
+            } */
             fclose ( out );
-            MPI_Barrier(MPI_COMM_WORLD);
+            MPI_Barrier(cart_com);
         }
     }
     return;
@@ -765,6 +872,9 @@ receiver_destroy ( receiver_t *recv )
     free ( recv->x );
     free ( recv->y );
     free ( recv->z );
+
+    free ( recv_to_rank );
+    free ( points_per_rank );
 }
 
 

@@ -19,6 +19,12 @@ MPI implementation divides problem space on Z-coordinates
 MPI implementation only works for saving recievers for problem size = 64x64x64  
 Nz = 1024 no longer supported for save recievers
 
+3d neighbour exchange
+6 faces
+4*3=12 long edges
+8 corners
+Total 26 neighbours
+
 ### Commands list
 Comparing two files
 ```
