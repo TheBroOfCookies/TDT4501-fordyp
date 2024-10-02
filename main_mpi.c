@@ -20,15 +20,17 @@
 void options ( int argc, char **argv );
 void config_print ( double elapsed_time );
 void time_step ( int_t iteration );
-void border_exchange_all ( void );
-void border_exchange_2d ( real_t *startS, real_t *startR, real_t *endS, real_t *endR );
 void insert_source ( int_t ts, source_t type );
 
-void fake_source ( void );
-int_t is_valid_coord (int coords[3]);
-void find_neighbours ( void );
+void create_types ( void );
 int_t point_to_rank(int_t x, int_t y, int_t z);
 void allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_t nrecvs );
+int_t is_valid_coord (int coords[3]);
+void find_neighbours ( void );
+void fake_source ( void );
+void border_exchange_all ( void );
+void border_exchange_2d ( real_t *startS, real_t *startR, real_t *endS, real_t *endR );
+void border_exchange_3d ( real_t *array );
 
 /* Weight coefficients, inner diff. loop */
 #define HALF 8
@@ -53,6 +55,11 @@ int_t
 
 MPI_Comm
     cart_com;
+
+MPI_Datatype
+    z_face_grid, x_face_grid, y_face_grid,
+    edge_grid,
+    corner_grid;
 
 source_t
     source_type = STRESS;
@@ -98,7 +105,7 @@ main ( int argc, char **argv )
     MPI_Comm_size ( MPI_COMM_WORLD, &size );
 
     int_t BroadcastBuffer[5];
-    if(MPI_RANK_ROOT){
+    if (MPI_RANK_ROOT) {
         if (ceil(log2(size)) != floor(log2(size))) {
             fprintf( stderr, "\nInvalid number of mpi ranks. Please choose a power of 2\n\n" );
             exit(1);
@@ -199,7 +206,7 @@ main ( int argc, char **argv )
     }
 
     /* START Parallel section for saving recievers*/
-    if(size > 1) {
+    if (size > 1) {
         if (tNz != 64) { //only 64x64x64 currently supported for saving recievers with MPI ranks
             fprintf( stderr, "\nTotal number of gridpoints in Z-direction must be 64 to support SAVE_RECIEVERS and MPI parallelizaiton.\n" );
             exit(1);
@@ -226,7 +233,7 @@ main ( int argc, char **argv )
     struct timeval t_start, t_end;
     gettimeofday ( &t_start, NULL );
     /* for ( int_t t=0; t<Nt; t++ ) {
-        //if(size > 1) border_exchange_all( );
+        //if (size > 1) border_exchange_all( );
         time_step ( t );
     } */
 
@@ -242,7 +249,7 @@ main ( int argc, char **argv )
 
     double elapsed_time = WALLTIME(t_end) - WALLTIME(t_start);
 #ifdef SAVE_RECEIVERS
-    if(size > 1){
+    if (size > 1){
         receiver_write_MPI ( recv, elapsed_time );
     } else {
         receiver_write ( recv, elapsed_time );
@@ -263,8 +270,15 @@ main ( int argc, char **argv )
     exit ( EXIT_SUCCESS );
 }
 
+
+void 
+create_types ( void ) 
+{
+
+}
+
 int_t 
-point_to_rank(int_t x, int_t y, int_t z) 
+point_to_rank ( int_t x, int_t y, int_t z ) 
 {
     for ( int r=0; r<size; r++ ) {  //Determining which rank contains the given point
         int r_coords[3];
@@ -275,9 +289,9 @@ point_to_rank(int_t x, int_t y, int_t z)
         int_t r_max_y = (r_coords[1]+1)*Ny-1;
         int_t r_min_z = r_coords[0]*Nz;
         int_t r_max_z = (r_coords[0]+1)*Nz-1;
-        if(r_max_z >= z && r_min_z <= z) {
-            if(r_max_y >= y && r_min_y <= y) {
-                if(r_max_x >= x && r_min_x <= x) {
+        if (r_max_z >= z && r_min_z <= z) {
+            if (r_max_y >= y && r_min_y <= y) {
+                if (r_max_x >= x && r_min_x <= x) {
                     //if (MPI_RANK_ROOT) printf("Rank: %d, contains x=%ld, y=%ld, z=%ld\n", r, x, y, z);
                     return r;
                 }
@@ -299,38 +313,38 @@ allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_
         int_t r_max_y = (r_coords[1]+1)*Ny-1;
         int_t r_min_z = r_coords[0]*Nz;
         int_t r_max_z = (r_coords[0]+1)*Nz-1;
-        if(r_max_z >= z+20 && r_min_z <= z+20) {
-            if(r_max_y >= y+20 && r_min_y <= y+20) {
-                if(r_max_x >= x+20 && r_min_x <= x+20) {
+        if (r_max_z >= z+20 && r_min_z <= z+20) {
+            if (r_max_y >= y+20 && r_min_y <= y+20) {
+                if (r_max_x >= x+20 && r_min_x <= x+20) {
                     receivers_to_rank[0] = r; //recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z+20;
                     recv_points_per_rank[r]++;
-                } if(r_max_x >= x-20 && r_min_x <= x-20) {
+                } if (r_max_x >= x-20 && r_min_x <= x-20) {
                     receivers_to_rank[1] = r; //recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z+20;
                     recv_points_per_rank[r]++;
                 }
-            } if(r_max_y >= y-20 && r_min_y <= y-20) {
-                if(r_max_x >= x-20 && r_min_x <= x-20) {
+            } if (r_max_y >= y-20 && r_min_y <= y-20) {
+                if (r_max_x >= x-20 && r_min_x <= x-20) {
                     receivers_to_rank[2] = r; //recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = z+20;
                     recv_points_per_rank[r]++;
-                } if(r_max_x >= x+20 && r_min_x <= x+20) {
+                } if (r_max_x >= x+20 && r_min_x <= x+20) {
                     receivers_to_rank[3] = r; //recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z+20;
                     recv_points_per_rank[r]++;
                 }
             }
-        } if(r_max_z >= z-20 && r_min_z <= z-20) {
-            if(r_max_y >= y+20 && r_min_y <= y+20) {
-                if(r_max_x >= x+20 && r_min_x <= x+20) {
+        } if (r_max_z >= z-20 && r_min_z <= z-20) {
+            if (r_max_y >= y+20 && r_min_y <= y+20) {
+                if (r_max_x >= x+20 && r_min_x <= x+20) {
                     receivers_to_rank[4] = r; //recv->x[4] = x+20, recv->y[4] = y+20, recv->z[4] = z-20;
                     recv_points_per_rank[r]++;
-                } if(r_max_x >= x-20 && r_min_x <= x-20) {
+                } if (r_max_x >= x-20 && r_min_x <= x-20) {
                     receivers_to_rank[5] = r; //recv->x[5] = x-20, recv->y[5] = y+20, recv->z[5] = z-20;
                     recv_points_per_rank[r]++;
                 }
-            } if(r_max_y >= y-20 && r_min_y <= y-20) {
-                if(r_max_x >= x-20 && r_min_x <= x-20) {
+            } if (r_max_y >= y-20 && r_min_y <= y-20) {
+                if (r_max_x >= x-20 && r_min_x <= x-20) {
                     receivers_to_rank[6] = r; //recv->x[6] = x-20, recv->y[6] = y-20, recv->z[6] = z-20;
                     recv_points_per_rank[r]++;
-                } if(r_max_x >= x+20 && r_min_x <= x+20) {
+                } if (r_max_x >= x+20 && r_min_x <= x+20) {
                     receivers_to_rank[7] = r; //recv->x[7] = x+20, recv->y[7] = y-20, recv->z[7] = z-20;
                     recv_points_per_rank[r]++;
                 }
@@ -338,14 +352,14 @@ allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_
         }
     }
     //print result of receiver allocation
-    if (MPI_RANK_ROOT) {
+    if ( MPI_RANK_ROOT ) {
         printf("Receiver point -> rank\n");
-        for (int_t i = 0; i < nrecvs; i++) {
+        for ( int_t i = 0; i < nrecvs; i++ ) {
             printf("%ld->%ld\t", i, recv_to_rank[i]);
         }
         printf("\n");
         printf("Rank -> number of receiver points\n");
-        for (int_t i = 0; i < size; i++) {
+        for ( int_t i = 0; i < size; i++ ) {
             printf("%ld->%ld\t", i, points_per_rank[i]);
         }
         printf("\n");
@@ -653,7 +667,7 @@ border_exchange_2d ( real_t *upSnd, real_t *upRcv, real_t *downSnd, real_t *down
 {
     // Exchange border for each valid array
     int count = HNx*HNy*HALO; 
-    if(rank != size - 1) { //if not last rank, send up
+    if (rank != size - 1) { //if not last rank, send up
         MPI_Send(upSnd, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD);
         MPI_Recv(upRcv, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     } 
@@ -661,6 +675,27 @@ border_exchange_2d ( real_t *upSnd, real_t *upRcv, real_t *downSnd, real_t *down
         MPI_Recv(downRcv, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Send(downSnd, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD);
     }
+}
+
+void
+border_exchange_3d ( real_t *array )
+{
+    // just skeleton for now
+     for ( int_t k=0; k<6; k++ ) {
+            //border_exchange t1_neighbours[k];
+            //MPI_Sendrecv(sendbuf, 1, datatype, t1_neighbours[k], 0, recvbuf, 1, datatype, t1_neighbours[k], 0, cart_com, MPI_STATUS_IGNORE)
+        }
+
+        for ( int_t j=0; j<12; j++ ) {
+            //border_exchange t2_neighbours[j];
+            //MPI_Sendrecv(sendbuf, 1, datatype, t1_neighbours[k], 0, recvbuf, 1, datatype, t2_neighbours[j], 0, cart_com, MPI_STATUS_IGNORE)
+        }
+
+        for ( int_t i=0; i<8; i++ ) {
+            //border_exchange t3_neighbours[i];
+            //MPI_Sendrecv(sendbuf, 1, datatype, t1_neighbours[k], 0, recvbuf, 1, datatype, t3_neighbours[i], 0, cart_com, MPI_STATUS_IGNORE)
+        }
+    
 }
 
 
@@ -794,7 +829,7 @@ receiver_setup ( receiver_t *recv, int_t nrecvs )
         return;
     // Convenience aliases
     int_t x=source_x, y=source_y, z=source_z;
-    if(size > 1) {
+    if (size > 1) {
         int_t p_num = 0;
         for (int_t p = 0; p < nrecvs; p++){
             if (recv_to_rank[p] == rank){
@@ -885,7 +920,7 @@ receiver_save ( int_t ts, receiver_t *recv )
 void
 receiver_write_MPI ( receiver_t *recv, double elapsed_time )
 {
-    for (int r = 0; r < size; r++){
+    for ( int r = 0; r < size; r++ ){
         if (rank != r) {
             MPI_Barrier(cart_com);
         } else {
