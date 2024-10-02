@@ -132,9 +132,9 @@ main ( int argc, char **argv )
         division_x = division_x*2;
         rest = rest/2;
     }
-    Nx = tNx/division_x;   // tNx = total number of pints in x direction
-    Ny = tNy/division_y;
-    Nz = tNz/division_z;   //only local Nz is different from global tNz
+    Nx = tNx/division_x;
+    Ny = tNy/division_y;    
+    Nz = tNz/division_z;  
     
     if (rank == 0) {
         printf("In total: tNx %ld tNy %ld tNz %ld\n", tNx, tNy, tNz);
@@ -160,9 +160,6 @@ main ( int argc, char **argv )
     printf("%d\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n", rank, min_x, max_x, min_y, max_y, min_z, max_z);
     
     
-
-    
-
     /* Source coordinates: initialized here b/c not constant with
      * different domain sizes
      */
@@ -215,7 +212,7 @@ main ( int argc, char **argv )
         }
         if (rank == 0) printf("\n");
 
-        receiver_init ( recv, nrecvs/size, false, true, true, true );
+        receiver_init ( recv, points_per_rank[rank], false, true, true, true );
         receiver_setup ( recv, nrecvs );
         
         /* END Parallel section for saving recievers*/
@@ -379,8 +376,7 @@ time_step ( int_t ts )
 
     /* Collect samples, if enabled */
 #ifdef SAVE_RECEIVERS
-    if (size > 1) { receiver_save_MPI ( ts, recv ); }
-    else { receiver_save ( ts, recv ); }
+    receiver_save ( ts, recv );
 #endif
 
     /* Call pattern: to, from, scale
@@ -684,23 +680,21 @@ receiver_setup ( receiver_t *recv, int_t nrecvs )
     // Convenience aliases
     int_t x=source_x, y=source_y, z=source_z;
     if(size > 1) {
-        for (int_t r = 0; r < size; r++){
-            return;
+        int_t p_num = 0;
+        for (int_t p = 0; p < nrecvs; p++){
+            if (recv_to_rank[p] == rank){
+                switch (p) {
+                    case 0: recv->x[p_num] = x+20 - min_x, recv->y[p_num] = y+20 - min_y, recv->z[p_num] = z+20 - min_z; p_num++; break;
+                    case 1: recv->x[p_num] = x-20 - min_x, recv->y[p_num] = y+20 - min_y, recv->z[p_num] = z+20 - min_z; p_num++; break;
+                    case 2: recv->x[p_num] = x-20 - min_x, recv->y[p_num] = y-20 - min_y, recv->z[p_num] = z+20 - min_z; p_num++; break;
+                    case 3: recv->x[p_num] = x+20 - min_x, recv->y[p_num] = y-20 - min_y, recv->z[p_num] = z+20 - min_z; p_num++; break;
+                    case 4: recv->x[p_num] = x+20 - min_x, recv->y[p_num] = y+20 - min_y, recv->z[p_num] = z-20 - min_z; p_num++; break;
+                    case 5: recv->x[p_num] = x-20 - min_x, recv->y[p_num] = y+20 - min_y, recv->z[p_num] = z-20 - min_z; p_num++; break;
+                    case 6: recv->x[p_num] = x-20 - min_x, recv->y[p_num] = y-20 - min_y, recv->z[p_num] = z-20 - min_z; p_num++; break;
+                    case 7: recv->x[p_num] = x+20 - min_x, recv->y[p_num] = y-20 - min_y, recv->z[p_num] = z-20 - min_z; p_num++; break;
+                }
+            }
         }
-        /* if (rcv1_rank == rank) {
-            printf("%ld rank %d\n", z+20 - min_z, rank);
-            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z+20 - min_z;
-            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z+20 - min_z;
-            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = z+20 - min_z;
-            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z+20 - min_z;
-        }
-        if (rcv0_rank == rank) {
-            printf("%ld rank %d\n", z-20 - min_z, rank);
-            recv->x[0] = x+20, recv->y[0] = y+20, recv->z[0] = z-20 - min_z;   //actual z[4]
-            recv->x[1] = x-20, recv->y[1] = y+20, recv->z[1] = z-20 - min_z;   //actual z[5]
-            recv->x[2] = x-20, recv->y[2] = y-20, recv->z[2] = z-20 - min_z;   //actual z[6]
-            recv->x[3] = x+20, recv->y[3] = y-20, recv->z[3] = z-20 - min_z;   //actual z[7]
-        } */
         return;
     }
 
@@ -774,17 +768,6 @@ receiver_save ( int_t ts, receiver_t *recv )
 }
 
 void
-receiver_save_MPI ( int_t ts, receiver_t *recv )
-{
-    for ( int_t r=0; r<recv->n/size; r++ ) {
-        int_t k = recv->z[r], j = recv->y[r], i = recv->x[r];
-        recv->vx[r*Nt+ts] = VX(k,j,i);
-        recv->vy[r*Nt+ts] = VY(k,j,i);
-        recv->vz[r*Nt+ts] = VZ(k,j,i);
-    }
-}
-
-void
 receiver_write_MPI ( receiver_t *recv, double elapsed_time )
 {
     for (int r = 0; r < size; r++){
@@ -792,14 +775,14 @@ receiver_write_MPI ( receiver_t *recv, double elapsed_time )
             MPI_Barrier(cart_com);
         } else {
             char filename[50];
-            sprintf(filename, "receivers_mpi%d.csv", r);
+            sprintf(filename, "receivers/receivers_mpi%d.csv", r);
             FILE *out = fopen ( filename, "w" );
             fprintf( out, "%d,%lf\n", size, elapsed_time);
             fprintf ( out, "%ld,%d,%ld\t", recv->n, HALO, Nt );
             fprintf( out, "%ld,%ld,%ld\n", tNx, tNy, tNz);
-            fprintf( out, "%d,%d,%d\n", rank, rank, rank);
-            /* 
-            for ( int_t r=0; r<recv->n/size; r++ )
+            //fprintf( out, "%d,%d,%d\n", rank, rank, rank);
+            
+            for ( int_t r=0; r<recv->n; r++ )
             {
                 fprintf ( out, "Vx\n" );
                 for ( int_t t=0; t<Nt; t++ )
@@ -811,7 +794,7 @@ receiver_write_MPI ( receiver_t *recv, double elapsed_time )
                 for ( int_t t=0; t<Nt; t++ )
                     fprintf ( out, "%e\n", recv->vz[r*Nt+t] );
                 fprintf ( out, "\n" );
-            } */
+            }
             fclose ( out );
             MPI_Barrier(cart_com);
         }
@@ -823,7 +806,7 @@ receiver_write_MPI ( receiver_t *recv, double elapsed_time )
 void
 receiver_write ( receiver_t *recv, double elapsed_time )
 {
-    FILE *out = fopen ( "receivers.csv", "w" );
+    FILE *out = fopen ( "receivers/receivers.csv", "w" );
     fprintf( out, "1,%lf\n", elapsed_time);
     fprintf ( out, "%ld,%d,%ld\t", recv->n, HALO, Nt );
     fprintf( out, "%ld,%ld,%ld\n", tNx, tNy, tNz);

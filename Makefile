@@ -6,6 +6,9 @@ CFLAGS_icc=-qopenmp
 CFLAGS+=-std=c99 -O3 ${OUTPUT} ${CFLAGS_${CC}} -DSAVE_RECEIVERS=ON
 LDLIBS+=-lm
 TARGETS=main_mpi
-all: ${TARGETS}
+
+all: dirs ${TARGETS}
+dirs:
+	mkdir -p receivers
 clean:
-	-rm -f ${TARGETS}
+	-rm -f ${TARGETS} receivers
