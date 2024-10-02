@@ -23,6 +23,7 @@ void border_exchange_all ( void );
 void border_exchange_2d ( real_t *startS, real_t *startR, real_t *endS, real_t *endR );
 void insert_source ( int_t ts, source_t type );
 
+void fake_source ( void );
 int_t point_to_rank(int_t x, int_t y, int_t z);
 void allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_t nrecvs );
 
@@ -218,10 +219,18 @@ main ( int argc, char **argv )
     
     struct timeval t_start, t_end;
     gettimeofday ( &t_start, NULL );
-    for ( int_t t=0; t<Nt; t++ ) {
+    /* for ( int_t t=0; t<Nt; t++ ) {
         //if(size > 1) border_exchange_all();
         time_step ( t );
+    } */
+
+    fake_source();
+    for ( int_t t=0; t<Nt; t++ ) {
+        #ifdef SAVE_RECEIVERS
+        receiver_save ( t, recv );
+        #endif
     }
+        
     gettimeofday ( &t_end, NULL );
 
 
@@ -335,7 +344,19 @@ allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_
     if (rank == 0) printf("\n");
 }
 
-
+void
+fake_source ( )
+{
+    for ( int_t z=0; z<HNz; z++ ) {
+        for ( int_t y=0; y<HNy; y++ ) {
+            for ( int_t x=0; x<HNx; x++ ) {
+                VX(z,y,x) = rank;
+                VY(z,y,x) = rank;
+                VZ(z,y,x) = rank;
+            }
+        }
+    }
+}
 
 void
 insert_source ( int_t ts, source_t type )
