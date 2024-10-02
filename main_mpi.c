@@ -36,7 +36,7 @@ int_t
     tNx=0, tNy=0, tNz=0;
 
 int
-    rank, size,
+    rank, size, source_rank,
     n_dims = 3, cart_dims[3], cart_coords[3];
 
 int_t
@@ -172,6 +172,7 @@ main ( int argc, char **argv )
         source[t] = 1.0e4 * (2.0 * arg - 1.0) * exp(-arg);
     }
 
+    source_rank = point_to_rank(source_x-HALO, source_y-HALO, source_z-HALO);
 
 #ifdef SAVE_RECEIVERS
     recv = malloc(sizeof(receiver_t));
@@ -196,32 +197,17 @@ main ( int argc, char **argv )
             fprintf( stderr, "\nTotal number of gridpoints in Z-direction must be 64 to support SAVE_RECIEVERS and MPI parallelizaiton.\n" );
             exit(1);
         }
-        MPI_Barrier(cart_com);
-        sleep(1);
-        recv_to_rank = malloc(sizeof(int_t)*nrecvs);
-        points_per_rank = calloc(size, sizeof(int_t));
-        allocate_receivers( recv_to_rank, points_per_rank, nrecvs);
-        if (rank == 0) printf("Receiver point -> rank\n");
-        for (int_t i = 0; i < nrecvs; i++) {
-            if (rank == 0) printf("%ld->%ld\t", i, recv_to_rank[i]);
-        }
-        if (rank == 0) printf("\n");
-        if (rank == 0) printf("Rank -> number of receiver points\n");
-        for (int_t i = 0; i < size; i++) {
-            if (rank == 0) printf("%ld->%ld\t", i, points_per_rank[i]);
-        }
-        if (rank == 0) printf("\n");
-
-        receiver_init ( recv, points_per_rank[rank], false, true, true, true );
-        receiver_setup ( recv, nrecvs );
         
-        /* END Parallel section for saving recievers*/
-        
-    } else {
-        printf("measure points %ld, %ld\n", source_z-20, source_z+20);
-        receiver_init ( recv, nrecvs, false, true, true, true );
-        receiver_setup ( recv, nrecvs );
     }
+    
+    MPI_Barrier(cart_com);
+    sleep(1);
+    recv_to_rank = malloc(sizeof(int_t)*nrecvs);
+    points_per_rank = calloc(size, sizeof(int_t));
+    allocate_receivers( recv_to_rank, points_per_rank, nrecvs);
+
+    receiver_init ( recv, points_per_rank[rank], false, true, true, true );
+    receiver_setup ( recv, nrecvs );
 #endif
 
     model = malloc (sizeof(model_t));
@@ -265,14 +251,31 @@ main ( int argc, char **argv )
 int_t 
 point_to_rank(int_t x, int_t y, int_t z) 
 {
-
+    for ( int r=0; r<size; r++ ) {  //Determining which rank contains the given point
+        int r_coords[3];
+        MPI_Cart_coords ( cart_com, r, n_dims, r_coords );
+        int_t r_min_x = r_coords[2]*Nx;
+        int_t r_max_x = (r_coords[2]+1)*Nx-1;
+        int_t r_min_y = r_coords[1]*Ny;
+        int_t r_max_y = (r_coords[1]+1)*Ny-1;
+        int_t r_min_z = r_coords[0]*Nz;
+        int_t r_max_z = (r_coords[0]+1)*Nz-1;
+        if(r_max_z >= z && r_min_z <= z) {
+            if(r_max_y >= y && r_min_y <= y) {
+                if(r_max_x >= x && r_min_x <= x) {
+                    //if (rank == 0) printf("Rank: %d, contains x=%ld, y=%ld, z=%ld\n", r, x, y, z);
+                    return r;
+                }
+            }
+        }
+    }
 }
 
 void
 allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_t nrecvs)
 {
     int_t z=source_z, y=source_y, x=source_x;
-    for ( int_t r=0; r<size; r++ ) {  //Determining which ranks will have the recievers for 64x64x64
+    for ( int r=0; r<size; r++ ) {  //Determining which ranks will have the recievers for 64x64x64
         int r_coords[3];
         MPI_Cart_coords ( cart_com, r, n_dims, r_coords );
         int_t r_min_x = r_coords[2]*Nx;
@@ -319,7 +322,20 @@ allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_
             }
         }
     }
+    //print result of allocations
+    if (rank == 0) printf("Receiver point -> rank\n");
+    for (int_t i = 0; i < nrecvs; i++) {
+        if (rank == 0) printf("%ld->%ld\t", i, recv_to_rank[i]);
+    }
+    if (rank == 0) printf("\n");
+    if (rank == 0) printf("Rank -> number of receiver points\n");
+    for (int_t i = 0; i < size; i++) {
+        if (rank == 0) printf("%ld->%ld\t", i, points_per_rank[i]);
+    }
+    if (rank == 0) printf("\n");
 }
+
+
 
 void
 insert_source ( int_t ts, source_t type )
@@ -329,9 +345,7 @@ insert_source ( int_t ts, source_t type )
     real_t s = source[ts];
     // Determine source type, act accordingly
     // Determine correct rank for force application
-    if (x < min_x || x > max_x+HALO) return;
-    if (y < min_y || y > max_y+HALO) return;
-    if (z < min_z || z > max_z+HALO) return; 
+    if (rank != source_rank) return;
     //adjust global coord to local coord
     x = x - (min_x);
     y = y - (min_y);

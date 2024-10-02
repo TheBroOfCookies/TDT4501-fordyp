@@ -11,4 +11,4 @@ all: dirs ${TARGETS}
 dirs:
 	mkdir -p receivers
 clean:
-	-rm -f ${TARGETS} receivers
+	-rm -fr ${TARGETS} receivers
