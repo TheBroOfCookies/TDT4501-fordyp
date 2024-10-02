@@ -13,6 +13,7 @@
 #include "kernels.h"
 
 #define WALLTIME(t) ((double)(t).tv_sec + 1e-6 * (double)(t).tv_usec)
+#define MPI_RANK_ROOT  ( rank == 0 )
 
 
 /* Function prototypes */
@@ -24,6 +25,8 @@ void border_exchange_2d ( real_t *startS, real_t *startR, real_t *endS, real_t *
 void insert_source ( int_t ts, source_t type );
 
 void fake_source ( void );
+int_t is_valid_coord (int coords[3]);
+void find_neighbours ( void );
 int_t point_to_rank(int_t x, int_t y, int_t z);
 void allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_t nrecvs );
 
@@ -38,7 +41,9 @@ int_t
 
 int
     rank, size, source_rank,
-    n_dims = 3, cart_dims[3], cart_coords[3];
+    n_dims = 3, cart_dims[3], cart_coords[3],
+    t1_neighbours[6], t2_neighbours[12], t3_neighbours[8];
+    //t1 flat neighbours, t2 edge neighbours, t3 corner neighbours
 
 int_t
     rcv0_min, rcv1_min,
@@ -48,7 +53,6 @@ int_t
 
 MPI_Comm
     cart_com;
-
 
 source_t
     source_type = STRESS;
@@ -94,7 +98,7 @@ main ( int argc, char **argv )
     MPI_Comm_size ( MPI_COMM_WORLD, &size );
 
     int_t BroadcastBuffer[5];
-    if(rank == 0){
+    if(MPI_RANK_ROOT){
         if (ceil(log2(size)) != floor(log2(size))) {
             fprintf( stderr, "\nInvalid number of mpi ranks. Please choose a power of 2\n\n" );
             exit(1);
@@ -134,10 +138,10 @@ main ( int argc, char **argv )
         rest = rest/2;
     }
     Nx = tNx/division_x;
-    Ny = tNy/division_y;    
+    Ny = tNy/division_y;
     Nz = tNz/division_z;  
     
-    if (rank == 0) {
+    if (MPI_RANK_ROOT) {
         printf("In total: tNx %ld tNy %ld tNz %ld\n", tNx, tNy, tNz);
         printf("Per rank:  Nx %ld  Ny %ld  Nz %ld\n",Nx, Ny, Nz);
     }
@@ -156,10 +160,12 @@ main ( int argc, char **argv )
     min_z = cart_coords[0]*Nz;
     max_z = (cart_coords[0]+1)*Nz-1;  
 
-    if (rank == 0) printf("Rank\tmin_x\tmax_x\tmin_y\tmax_y\tmin_z\tmax_z\n");
+    if (MPI_RANK_ROOT) printf("Rank\tmin_x\tmax_x\tmin_y\tmax_y\tmin_z\tmax_z\tCarthesian cooridnates\n");
     else sleep(1);
-    printf("%d\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n", rank, min_x, max_x, min_y, max_y, min_z, max_z);
-    
+    printf("%d\t%ld\t%ld\t%ld\t%ld\t%ld\t%ld\t%d\t%d\t%d\n", rank, min_x, max_x, min_y, max_y, min_z, max_z, cart_coords[0], cart_coords[1], cart_coords[2]);
+    sleep(1);
+    MPI_Barrier(cart_com);
+    find_neighbours( );
     
     /* Source coordinates: initialized here b/c not constant with
      * different domain sizes
@@ -220,11 +226,11 @@ main ( int argc, char **argv )
     struct timeval t_start, t_end;
     gettimeofday ( &t_start, NULL );
     /* for ( int_t t=0; t<Nt; t++ ) {
-        //if(size > 1) border_exchange_all();
+        //if(size > 1) border_exchange_all( );
         time_step ( t );
     } */
 
-    fake_source();
+    fake_source( );
     for ( int_t t=0; t<Nt; t++ ) {
         #ifdef SAVE_RECEIVERS
         receiver_save ( t, recv );
@@ -253,7 +259,7 @@ main ( int argc, char **argv )
     receiver_destroy ( recv );
     free ( recv );
 #endif
-    MPI_Finalize ();
+    MPI_Finalize ( );
     exit ( EXIT_SUCCESS );
 }
 
@@ -272,7 +278,7 @@ point_to_rank(int_t x, int_t y, int_t z)
         if(r_max_z >= z && r_min_z <= z) {
             if(r_max_y >= y && r_min_y <= y) {
                 if(r_max_x >= x && r_min_x <= x) {
-                    //if (rank == 0) printf("Rank: %d, contains x=%ld, y=%ld, z=%ld\n", r, x, y, z);
+                    //if (MPI_RANK_ROOT) printf("Rank: %d, contains x=%ld, y=%ld, z=%ld\n", r, x, y, z);
                     return r;
                 }
             }
@@ -331,17 +337,89 @@ allocate_receivers ( int_t *receivers_to_rank, int_t *recv_points_per_rank, int_
             }
         }
     }
-    //print result of allocations
-    if (rank == 0) printf("Receiver point -> rank\n");
-    for (int_t i = 0; i < nrecvs; i++) {
-        if (rank == 0) printf("%ld->%ld\t", i, recv_to_rank[i]);
+    //print result of receiver allocation
+    if (MPI_RANK_ROOT) {
+        printf("Receiver point -> rank\n");
+        for (int_t i = 0; i < nrecvs; i++) {
+            printf("%ld->%ld\t", i, recv_to_rank[i]);
+        }
+        printf("\n");
+        printf("Rank -> number of receiver points\n");
+        for (int_t i = 0; i < size; i++) {
+            printf("%ld->%ld\t", i, points_per_rank[i]);
+        }
+        printf("\n");
     }
-    if (rank == 0) printf("\n");
-    if (rank == 0) printf("Rank -> number of receiver points\n");
-    for (int_t i = 0; i < size; i++) {
-        if (rank == 0) printf("%ld->%ld\t", i, points_per_rank[i]);
+}
+
+int_t
+is_valid_coord ( int coord[3] ) 
+{
+    if (coord[0] < cart_dims[0] && coord[0] >= 0) {
+        if (coord[1] < cart_dims[1] && coord[1] >= 0) {
+            if (coord[2] < cart_dims[2] && coord[2] >= 0) {
+                return 1;
+            }   
+        }
     }
-    if (rank == 0) printf("\n");
+    return 0;
+}
+
+void
+find_neighbours ( ) 
+{
+    //offsets from the current rank to all "faces" neighbours
+    //        offsets for     z  y  x
+    int_t t1_offsets[6*3] = { 1, 0, 0,   -1, 0, 0,   
+                              0, 1, 0,    0,-1, 0,
+                              0, 0, 1,    0, 0,-1 };
+    for ( int_t k=0; k<6; k++ ) {
+        int coords[3] = {cart_coords[0]+t1_offsets[3*k], cart_coords[1]+t1_offsets[3*k+1], cart_coords[2]+t1_offsets[3*k+2]};
+        if ( is_valid_coord(coords) ) { MPI_Cart_rank(cart_com, coords, &t1_neighbours[k]); }
+        else { t1_neighbours[k] = MPI_PROC_NULL; }
+    }
+
+     //offsets from the current rank to all "edge" neighbours
+    int_t t2_offsets[12*3] = { 1, 1, 0,   1,-1, 0,   1, 0, 1,   1, 0,-1,
+                              -1, 1, 0,  -1,-1, 0,  -1, 0, 1,  -1, 0,-1,  
+                               0, 1, 1,   0,-1, 1,   
+                               0,-1, 1,   0,-1,-1 };
+    for ( int_t j=0; j<12; j++ ) {
+        int coords[3] = {cart_coords[0]+t2_offsets[3*j], cart_coords[1]+t2_offsets[3*j+1], cart_coords[2]+t2_offsets[3*j+2]};
+        if ( is_valid_coord(coords) ) { MPI_Cart_rank(cart_com, coords, &t2_neighbours[j]); }
+        else { t2_neighbours[j] = MPI_PROC_NULL; }
+    }
+
+    //offsets from the current rank to all "corner" neighbours
+    int_t t3_offsets[8*3] = { 1, 1, 1,   1, 1,-1,   1,-1, 1,   1,-1,-1,
+                             -1, 1, 1,  -1, 1,-1,  -1,-1, 1,  -1,-1,-1 };
+    for ( int_t i=0; i<8; i++ ) {
+        int coords[3] = {cart_coords[0]+t3_offsets[3*i], cart_coords[1]+t3_offsets[3*i+1], cart_coords[2]+t3_offsets[3*i+2]};
+        if ( is_valid_coord(coords) ) { MPI_Cart_rank(cart_com, coords, &t3_neighbours[i]); }
+        else { t3_neighbours[i] = MPI_PROC_NULL; }
+    }
+
+    //if (MPI_RANK_ROOT) {
+    if (rank == 0) {
+        printf("Neighbours of rank %d\n", rank);
+
+        printf("T1: \t");
+        for ( int_t k=0; k<6; k++ ) {
+            printf("%d\t", t1_neighbours[k]);
+        }
+
+        printf("\nT2: \t");
+        for ( int_t j=0; j<12; j++ ) {
+            printf("%d\t", t2_neighbours[j]);
+        }
+
+        printf("\nT3: \t");
+        for ( int_t i=0; i<8; i++ ) {
+            printf("%d\t", t3_neighbours[i]);
+        }
+        printf("\n");
+    }
+
 }
 
 void
@@ -549,6 +627,7 @@ time_step ( int_t ts )
                     * 0.25 * (DEL1(k,j,i)+DEL2(k,j,i))
                 );
 }
+
 void
 border_exchange_all ( void )
 {
@@ -568,6 +647,7 @@ border_exchange_all ( void )
 
 
 }
+
 void
 border_exchange_2d ( real_t *upSnd, real_t *upRcv, real_t *downSnd, real_t *downRcv )
 {
