@@ -2,9 +2,7 @@
 ```
 mpirun -np 2 ./main_mpi 64 64 64 500 1
 ```
-Runs a 64x64x64 point grid with 500 timesteps and sourcetype 1 and 2 processes  
-Maximum 2 ranks with -DSAVE_RECEIVERS=ON (set in makefile, default ON)
-Maximum 4 ranks with -DSAVE_RECEIVERS=OFF 
+Runs with 64x64x64 points in a grid, 500 timesteps, sourcetype 1 and 2 processes
 
 ### Sourcetypes
 1 = Stress monopole  
@@ -15,17 +13,43 @@ Maximum 4 ranks with -DSAVE_RECEIVERS=OFF
 S - Stress
 SXX stress double derivative with regards to X
 
-MPI implementation divides problem space on Z-coordinates  
-MPI implementation only works for saving recievers for problem size = 64x64x64  
-Nz = 1024 no longer supported for save recievers
+MPI implementation divides problem space in three dimentions, first along Z-, then Y-, then the X-axis  
+MPI implementation only works for saving recievers for problem size = 64x64x64 
 
-3d neighbour exchange
-6 faces
-4*3=12 long edges
-8 corners
-Total 26 neighbours
+## 3D neighbour exchange
+Border exchange with diagonal neighbours in three dimentions gives us a total of 26 neighbours  
+Divided by me into the following categories  
+|Category| Number of neighbours|Classification|
+|--------|:-------------------:|:------------:|
+| Faces  |        6            | T1           |
+| Edges  |        12           | T2           |
+| Corners|        8            | T3           |
 
-### Commands list
+### Neighbor order  
+Offset to neighbour from current rank in carthesian coordinates (using MPI_Cart_comm)  
+Each neighbour is also given a number from 0 to 25
+#### Faces (T1)
+| Nr| z | y | x |  | Nr| z | y | x |
+| - |---|---|---|--|---|---|---|---|
+| 0 | 1 | 0 | 0 |  | 1 | -1| 0 | 0 |
+| 2 | 0 | 1 | 0 |  | 3 |  0|-1 | 0 |
+| 4 | 0 | 0 | 1 |  | 5 |  0| 0 |-1 |
+
+#### Edges (T2)
+| Nr| z | y | x |  | Nr| z | y | x |  | Nr| z | y | x |  | Nr| z | y | x |
+|---|---|---|---|--|---|---|---|---|--|---|---|---|---|--|---|---|---|---|
+| 6 | 1 | 1 | 0 |  | 7 | 1 |-1 | 0 |  | 8 | 1 | 0 | 1 |  | 9 | 1 | 0 |-1 |
+|10 |-1 | 1 | 0 |  |11 |-1 |-1 | 0 |  |12 |-1 | 0 | 1 |  |13 |-1 | 0 |-1 |
+|14 | 0 | 1 | 1 |  |15 | 0 |-1 | 1 |  |16 | 0 | 1 |-1 |  |17 | 0 |-1 |-1 |
+
+#### Corners (T3)
+| Nr| z | y | x |  | Nr| z | y | x |  | Nr| z | y | x |  | Nr| z | y | x |
+|---|---|---|---|--|---|---|---|---|--|---|---|---|---|--|---|---|---|---|
+|18 | 1 | 1 | 1 |  |19 | 1 | 1 |-1 |  |20 | 1 |-1 | 1 |  |21 | 1 |-1 |-1 |
+|22 |-1 | 1 | 1 |  |23 |-1 | 1 |-1 |  |24 |-1 |-1 | 1 |  |25 |-1 |-1 |-1 |
+
+
+## Commands list
 Comparing two files
 ```
 diff file1 file2
@@ -41,21 +65,23 @@ diff <(tail -n +3 file1) <(tail -n +3 file2)
 ```
 
 Saved command for checking number of lines
+
+
+
+### Debuggin clipboard
+```
+make; mpirun -np 1 ./main_mpi 64 64 64 500 1; mpirun -np 2 ./main_mpi 64 64 64 500 1; diff -y --suppress-common-lines receivers.csv receivers_mpi.csv | wc -l
+```
+
 ```
 diff receivers.csv receivers_fasit.csv
 
 diff -y --suppress-common-lines receivers.csv receivers_fasit.csv | wc -l
 
+diff -y --suppress-common-lines <(tail -n +3 receivers.csv) <(tail -n +3 receivers_fasit.csv) | wc -l
+
 
 diff receivers.csv receivers_mpi.csv
 
 diff -y --suppress-common-lines receivers.csv receivers_mpi.csv | wc -l
-
-diff -y --suppress-common-lines <(tail -n +3 receivers.csv) <(tail -n +3 receivers_fasit.csv) | wc -l
-```
-
-
-debuggin shorthand
-```
-make; mpirun -np 1 ./main_mpi 64 64 64 500 1; mpirun -np 2 ./main_mpi 64 64 64 500 1; diff -y --suppress-common-lines receivers.csv receivers_mpi.csv | wc -l
 ```
