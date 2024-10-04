@@ -81,6 +81,6 @@ for i in range(1,9):
 
 time = strftime("%Y-%m-%d-%H-%M-%S", gmtime())
 title = title + " all Vx"
-#plt.savefig("figures/"+title+"__"+time)
+#plt.savefig("figures/visualized/"+title+"__"+time)
 plt.show()
             

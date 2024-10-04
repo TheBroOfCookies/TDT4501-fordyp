@@ -25,13 +25,16 @@ Divided by me into the following categories
 | Edges  |        12           | T2           |
 | Corners|        8            | T3           |
 
+![Alt text](figures\neighbours\3d.png) Red = T1, Green = T2, Blue = T3
+
 ### Neighbor order  
 Offset to neighbour from current rank in carthesian coordinates (using MPI_Cart_comm)  
-Each neighbour is also given a number from 0 to 25
+Each neighbour is also given a number from 0 to 25  
+Numbers are arranged in the following order T1->T2->T3   
 #### Faces (T1)
 | Nr| z | y | x |  | Nr| z | y | x |
 | - |---|---|---|--|---|---|---|---|
-| 0 | 1 | 0 | 0 |  | 1 | -1| 0 | 0 |
+| 0 | 1 | 0 | 0 |  | 1 |-1 | 0 | 0 |
 | 2 | 0 | 1 | 0 |  | 3 |  0|-1 | 0 |
 | 4 | 0 | 0 | 1 |  | 5 |  0| 0 |-1 |
 
@@ -47,6 +50,10 @@ Each neighbour is also given a number from 0 to 25
 |---|---|---|---|--|---|---|---|---|--|---|---|---|---|--|---|---|---|---|
 |18 | 1 | 1 | 1 |  |19 | 1 | 1 |-1 |  |20 | 1 |-1 | 1 |  |21 | 1 |-1 |-1 |
 |22 |-1 | 1 | 1 |  |23 |-1 | 1 |-1 |  |24 |-1 |-1 | 1 |  |25 |-1 |-1 |-1 |
+
+![Alt text](figures\neighbours\3d_annotated_numbered.png)
+Z, Y, X  (Nr)
+
 
 
 ## Commands list
