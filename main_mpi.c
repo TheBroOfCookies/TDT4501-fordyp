@@ -14,6 +14,8 @@
 
 #define WALLTIME(t) ((double)(t).tv_sec + 1e-6 * (double)(t).tv_usec)
 #define MPI_RANK_ROOT  ( rank == 0 )
+#define MPI_RANK_TEST  ( rank == 37 )
+#define ARRAY_INDEX(z,y,x,arr) (arr[(z)*HNy*HNx+(y)*HNx+(x)])
 
 
 /* Function prototypes */
@@ -30,8 +32,9 @@ int_t is_valid_coord (int coords[3]);
 void find_neighbours ( void );
 void fake_source ( void );
 void border_exchange_all ( void );
-void border_exchange_2d ( real_t *startS, real_t *startR, real_t *endS, real_t *endR );
 void border_exchange_3d ( real_t *array );
+
+void mpi_test_save ( real_t *array );
 
 /* Weight coefficients, inner diff. loop */
 #define HALF 8
@@ -46,7 +49,7 @@ int
     rank, size, source_rank,
     n_dims = 3, cart_dims[3], cart_coords[3],
     t1_neighbours[6], t2_neighbours[12], t3_neighbours[8];
-    //t1 flat neighbours, t2 edge neighbours, t3 corner neighbours
+    //t1 flat neighbours, t2 edge neighbours, t3 corner neighbours, see readme for more info
 
 int_t
     rcv0_min, rcv1_min,
@@ -58,6 +61,7 @@ MPI_Comm
     cart_com;
 
 MPI_Datatype
+    z_grid, 
     z_face_grid, y_face_grid, x_face_grid,
     z_edge_grid, y_edge_grid, x_edge_grid,
     corner_grid;
@@ -131,34 +135,27 @@ main ( int argc, char **argv )
         case 2: source_type=F_MONOP; break;
         case 3:   source_type=F_DIP; break;
     }
-    int_t rest = size;
-    int_t division_z = 1;
-    int_t division_y = 1;
-    int_t division_x = 1;
-    while (rest != 1) {
-        division_z = division_z*2;
-        rest = rest/2;
-        if (rest == 1) break;
-        division_y = division_y*2;
-        rest = rest/2;
-        if (rest == 1) break;
-        division_x = division_x*2;
-        rest = rest/2;
-    }
-    Nx = tNx/division_x;
-    Ny = tNy/division_y;
-    Nz = tNz/division_z;  
-    
-    if (MPI_RANK_ROOT) {
-        printf("In total: tNx %ld tNy %ld tNz %ld\n", tNx, tNy, tNz);
-        printf("Per rank:  Nx %ld  Ny %ld  Nz %ld\n",Nx, Ny, Nz);
-    }
 
     MPI_Dims_create ( size, n_dims, cart_dims );
     MPI_Cart_create ( MPI_COMM_WORLD, n_dims, cart_dims, (int[3]){0,0,0}, 0, &cart_com );
 
     MPI_Comm_rank ( cart_com, &rank );
     MPI_Cart_coords ( cart_com, rank, n_dims, cart_coords );
+
+    if (cart_dims[0] != 0) { Nz = tNz/cart_dims[0]; } 
+    else { Nz = tNz; }
+
+    if (cart_dims[1] != 0) { Ny = tNy/cart_dims[1]; } 
+    else { Ny = tNy; }
+
+    if (cart_dims[2] != 0) { Nx = tNx/cart_dims[2]; } 
+    else { Nx = tNx; }
+    
+    if (MPI_RANK_ROOT) {
+        printf("In total: tNx %ld tNy %ld tNz %ld\n", tNx, tNy, tNz);
+        printf("Per rank:  Nx %ld  Ny %ld  Nz %ld\n",Nx, Ny, Nz);
+    }
+
 
     //max and min global coordiantes for this rank
     min_x = cart_coords[2]*Nx;
@@ -215,8 +212,6 @@ main ( int argc, char **argv )
         
     }
     
-    MPI_Barrier(cart_com);
-    sleep(1);
     recv_to_rank = malloc(sizeof(int_t)*nrecvs);
     points_per_rank = calloc(size, sizeof(int_t));
     allocate_receivers( recv_to_rank, points_per_rank, nrecvs);
@@ -230,21 +225,24 @@ main ( int argc, char **argv )
     model_init ( model );
     mesh_init ( mesh );
     model_set_uniform ( model );
+
+    mpi_types_create ( );
     
     struct timeval t_start, t_end;
     gettimeofday ( &t_start, NULL );
     /* for ( int_t t=0; t<Nt; t++ ) {
-        //if (size > 1) border_exchange_all( );
+        if (size > 1) border_exchange_all( );
         time_step ( t );
     } */
 
     fake_source( );
-    for ( int_t t=0; t<Nt; t++ ) {
-        #ifdef SAVE_RECEIVERS
-        receiver_save ( t, recv );
-        #endif
-    }
-        
+    #ifdef SAVE_RECEIVERS
+    receiver_save ( 0, recv );
+    #endif
+    border_exchange_3d( mesh->vx );
+    MPI_Barrier( cart_com );
+    mpi_test_save ( mesh->vx );
+
     gettimeofday ( &t_end, NULL );
 
 
@@ -267,6 +265,7 @@ main ( int argc, char **argv )
     receiver_destroy ( recv );
     free ( recv );
 #endif
+    mpi_types_destroy ( );
     MPI_Finalize ( );
     exit ( EXIT_SUCCESS );
 }
@@ -275,48 +274,25 @@ main ( int argc, char **argv )
 void 
 mpi_types_create ( void ) 
 {
-/*   
+    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { HALO, Ny, Nx }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_FLOAT, &z_face_grid );
+    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { Nz, HALO, Nx }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_FLOAT, &y_face_grid );
+    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { Nz, Ny, HALO }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_FLOAT, &x_face_grid );
 
-    MPI_Datatype  aisle,   col,   row,
-                h_aisle, h_col, h_row, //h for Halo
-                xy_plane, yz_plane, xz_plane,
-                h_xy_plane, h_yz_plane, h_xz_plane;
+    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { Nz, HALO, HALO }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_FLOAT, &z_edge_grid );
+    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { HALO, Ny, HALO }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_FLOAT, &y_edge_grid );
+    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { HALO, HALO, Nx }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_FLOAT, &x_edge_grid );
 
-    MPI_Type_vector ( Nz, 1, HNy*HNx, MPI_DOUBLE, &aisle );
-    MPI_Type_vector ( Ny, 1, HNx, MPI_DOUBLE, &col );
-    MPI_Type_vector ( 1, Nx, HNx, MPI_DOUBLE, &row );
+    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { HALO, HALO, HALO }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_FLOAT, &corner_grid );
 
-    MPI_Type_vector ( HALO, 1, HNy*HNx, MPI_DOUBLE, &h_aisle );
-    MPI_Type_vector ( HALO, 1, HNx, MPI_DOUBLE, &h_col );
-    MPI_Type_vector ( 1, HALO, HNx, MPI_DOUBLE, &h_row );
+    MPI_Type_commit ( &z_face_grid );
+    MPI_Type_commit ( &y_face_grid );
+    MPI_Type_commit ( &x_face_grid );
 
-    MPI_Type_vector ( 1, Ny, 1, row, &xy_plane );
-    MPI_Type_vector ( 1, Nz, HNy, row, &xz_plane );
-    MPI_Type_vector ( 1, Nz, HNy, col, &yz_plane );
+    MPI_Type_commit ( &z_edge_grid );
+    MPI_Type_commit ( &y_edge_grid );
+    MPI_Type_commit ( &x_edge_grid );
 
-    MPI_Type_vector ( 1, HALO, 1, h_row, &h_xy_plane );
-    MPI_Type_vector ( 1, HALO, 1, h_xy_plane, &corner_grid); 
-
-    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { HALO, Ny, Nx }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_DOUBLE, &z_face_grid );
-    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { Nz, HALO, Nx }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_DOUBLE, &y_face_grid );
-    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { Nz, Ny, HALO }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_DOUBLE, &x_face_grid );
-
-    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { Nz, HALO, HALO }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_DOUBLE, &z_edge_grid );
-    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { HALO, Ny, HALO }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_DOUBLE, &y_edge_grid );
-    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { HALO, HALO, Nx }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_DOUBLE, &x_edge_grid );
-
-    MPI_Type_create_subarray ( n_dims,  (int[3]) { HNz, HNy, HNx }, (int[3]) { HALO, HALO, HALO }, (int[3]) {0,0,0}, MPI_ORDER_C, MPI_DOUBLE, &corner_grid );
-
-    MPI_Commit_type ( &z_face_grid );
-    MPI_Commit_type ( &y_face_grid );
-    MPI_Commit_type ( &x_face_grid );
-
-    MPI_Commit_type ( &z_edge_grid );
-    MPI_Commit_type ( &y_edge_grid );
-    MPI_Commit_type ( &x_edge_grid );
-
-    MPI_Commit_type ( &corner_grid );
-    */
+    MPI_Type_commit ( &corner_grid );
 }
 
 int_t 
@@ -424,7 +400,7 @@ is_valid_coord ( int coord[3] )
 void
 find_neighbours ( ) 
 {
-    //offsets from the current rank to all "face" neighbours
+    //carthesian offsets from the current rank to all "face" neighbours
     //        offsets for     z  y  x
     int_t t1_offsets[6*3] = { 1, 0, 0,   -1, 0, 0,   
                               0, 1, 0,    0,-1, 0,
@@ -435,7 +411,7 @@ find_neighbours ( )
         else { t1_neighbours[k] = MPI_PROC_NULL; }
     }
 
-     //offsets from the current rank to all "edge" neighbours
+     //carthesian offsets from the current rank to all "edge" neighbours
     int_t t2_offsets[12*3] = { 1, 1, 0,   1,-1, 0,   1, 0, 1,   1, 0,-1,
                               -1, 1, 0,  -1,-1, 0,  -1, 0, 1,  -1, 0,-1,  
                                0, 1, 1,   0,-1, 1,   0, 1,-1,   0,-1,-1 };
@@ -445,7 +421,7 @@ find_neighbours ( )
         else { t2_neighbours[j] = MPI_PROC_NULL; }
     }
 
-    //offsets from the current rank to all "corner" neighbours
+    //carthesian offsets from the current rank to all "corner" neighbours
     int_t t3_offsets[8*3] = { 1, 1, 1,   1, 1,-1,   1,-1, 1,   1,-1,-1,
                              -1, 1, 1,  -1, 1,-1,  -1,-1, 1,  -1,-1,-1 };
     for ( int_t i=0; i<8; i++ ) {
@@ -454,27 +430,38 @@ find_neighbours ( )
         else { t3_neighbours[i] = MPI_PROC_NULL; }
     }
 
-    //if (MPI_RANK_ROOT) {
-    if (rank == 37) {
+    if (MPI_RANK_TEST) {
         printf("---------------------------\n");
         printf("Neighbours of rank %d\n", rank);
 
         printf("T1: \n");
         for ( int_t k=0; k<6; k++ ) {
             if ( k%2 == 0 && k != 0 ) printf("\n");
-            printf("%d\t", t1_neighbours[k]);
+            if (t1_neighbours[k] != -2){
+                printf("%d\t", t1_neighbours[k]);
+            } else {
+                printf("-\t");
+            } 
         }
 
         printf("\nT2: \n");
         for ( int_t j=0; j<12; j++ ) {
             if ( j%4 == 0 && j != 0 ) printf("\n");
-            printf("%d\t", t2_neighbours[j]);
+            if (t2_neighbours[j] != -2) {
+                printf("%d\t", t2_neighbours[j]);
+            } else {
+                printf("-\t");
+            } 
         }
 
         printf("\nT3: \n");
         for ( int_t i=0; i<8; i++ ) {
             if ( i%4 == 0 && i != 0 ) printf("\n");
-            printf("%d\t", t3_neighbours[i]);
+            if (t3_neighbours[i] != -2) {
+                printf("%d\t", t3_neighbours[i]);;
+            } else {
+                printf("-\t");
+            } 
         }
         printf("\n");
         printf("---------------------------\n");
@@ -488,9 +475,15 @@ fake_source ( )
     for ( int_t z=0; z<HNz; z++ ) {
         for ( int_t y=0; y<HNy; y++ ) {
             for ( int_t x=0; x<HNx; x++ ) {
-                VX(z,y,x) = rank;
-                VY(z,y,x) = rank;
-                VZ(z,y,x) = rank;
+                if(x < HALO || x >= Nx+HALO || y < HALO || y >= Ny+HALO || z < HALO || z > Nz+HALO) {
+                    VX(z,y,x) = -1;
+                    VY(z,y,x) = -1;
+                    VZ(z,y,x) = -1;
+                } else {
+                    VX(z,y,x) = rank;
+                    VY(z,y,x) = rank;
+                    VZ(z,y,x) = rank;
+                }
             }
         }
     }
@@ -691,38 +684,18 @@ time_step ( int_t ts )
 void
 border_exchange_all ( void )
 {
+    border_exchange_3d( mesh->vx );
+    border_exchange_3d( mesh->vy );
+    border_exchange_3d( mesh->vz );
 
-    // generalized border exchange for variable HALO size
-    border_exchange_2d(&VX(HNz-2*HALO,0,0), &VX(HNz-HALO,0,0), &VX(HALO,0,0), &VX(0,0,0));
-    border_exchange_2d(&VY(HNz-2*HALO,0,0), &VY(HNz-HALO,0,0), &VY(HALO,0,0), &VY(0,0,0));
-    border_exchange_2d(&VZ(HNz-2*HALO,0,0), &VZ(HNz-HALO,0,0), &VZ(HALO,0,0), &VZ(0,0,0));
+    border_exchange_3d( mesh->sxx );
+    border_exchange_3d( mesh->syy );
+    border_exchange_3d( mesh->szz );
 
-    border_exchange_2d(&SXX(HNz-2*HALO,0,0), &SXX(HNz-HALO,0,0), &SXX(HALO,0,0), &SXX(0,0,0));
-    border_exchange_2d(&SYY(HNz-2*HALO,0,0), &SYY(HNz-HALO,0,0), &SYY(HALO,0,0), &SYY(0,0,0));
-    border_exchange_2d(&SZZ(HNz-2*HALO,0,0), &SZZ(HNz-HALO,0,0), &SZZ(HALO,0,0), &SZZ(0,0,0));
-
-    border_exchange_2d(&SXY(HNz-2*HALO,0,0), &SXY(HNz-HALO,0,0), &SXY(HALO,0,0), &SXY(0,0,0));
-    border_exchange_2d(&SYZ(HNz-2*HALO,0,0), &SYZ(HNz-HALO,0,0), &SYZ(HALO,0,0), &SYZ(0,0,0));
-    border_exchange_2d(&SXZ(HNz-2*HALO,0,0), &SXZ(HNz-HALO,0,0), &SXZ(HALO,0,0), &SXZ(0,0,0));
-
-
+    border_exchange_3d( mesh->sxy );
+    border_exchange_3d( mesh->syz );
+    border_exchange_3d( mesh->sxz );
 }
-
-void
-border_exchange_2d ( real_t *upSnd, real_t *upRcv, real_t *downSnd, real_t *downRcv )
-{
-    // Exchange border for each valid array
-    int count = HNx*HNy*HALO; 
-    if (rank != size - 1) { //if not last rank, send up
-        MPI_Send(upSnd, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD);
-        MPI_Recv(upRcv, count, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    } 
-    if (rank != 0) {  //if not first rank, send down
-        MPI_Recv(downRcv, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Send(downSnd, count, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD);
-    }
-}
-
 /*
 int_t t1_neighbour_order[6*3] = { 1, 0, 0,   -1, 0, 0,   
                                   0, 1, 0,    0,-1, 0,
@@ -757,7 +730,7 @@ border_exchange_3d ( real_t *array )
                                  x_face_grid, x_face_grid };
     MPI_Datatype t2_types[12] = { x_edge_grid, x_edge_grid, y_edge_grid, y_edge_grid, 
                                   x_edge_grid, x_edge_grid, y_edge_grid, y_edge_grid,
-                                  z_edge_grid, z_edge_grid, z_edge_grid, z_edge_grid, };
+                                  z_edge_grid, z_edge_grid, z_edge_grid, z_edge_grid };
 
     int_t t1_snd[6*3] = { Nz, HALO, HALO,        HALO, HALO, HALO,   
                           HALO, Ny, HALO,        HALO, HALO, HALO,
@@ -777,25 +750,24 @@ border_exchange_3d ( real_t *array )
                           HALO, Ny, Nx,                 HALO, Ny, HALO,         HALO, HALO, Nx,         HALO, HALO, HALO };
     int_t t3_rcv[8*3] = { Nz+HALO, Ny+HALO, Nx+HALO,    Nz+HALO, Ny+HALO, 0,    Nz+HALO, 0, Nx+HALO,    Nz+HALO, 0, 0,
                           0, Ny+HALO, Nx+HALO,          0, Ny+HALO, 0,          0, 0, Nx+HALO,          0, 0, 0 };
-                         
-     for ( int_t k=0; k<6; k++ ) {
-            real_t snd = VX(t1_snd[k], t1_snd[k+1], t1_snd[k+2]);
-            real_t rcv = VX(t1_rcv[k], t1_rcv[k+1], t1_rcv[k+2]);
-            MPI_Sendrecv(&snd, 1, t1_types[k], t1_neighbours[k], 0, &rcv, 1, t1_types[k], t1_neighbours[k], 0, cart_com, MPI_STATUS_IGNORE);
-        }
-
-        for ( int_t j=0; j<12; j++ ) {
-            real_t snd = VX(t2_snd[j], t2_snd[j+1], t2_snd[j+2]);
-            real_t rcv = VX(t2_rcv[j], t2_rcv[j+1], t2_rcv[j+2]);
-            MPI_Sendrecv(&snd, 1, t2_types[j], t2_neighbours[j], 0, &rcv, 1, t2_types[j], t2_neighbours[j], 0, cart_com, MPI_STATUS_IGNORE);
-        }
-
-        for ( int_t i=0; i<8; i++ ) {
-            real_t snd = VX(t3_snd[i], t3_snd[i+1], t3_snd[i+2]);
-            real_t rcv = VX(t3_rcv[i], t3_rcv[i+1], t3_rcv[i+2]);
-            MPI_Sendrecv(&snd, 1, corner_grid, t3_neighbours[i], 0, &rcv, 1, corner_grid, t2_neighbours[i], 0, cart_com, MPI_STATUS_IGNORE);
-        }
     
+    for ( int_t k=0; k<6; k++ ) {
+        real_t *snd = &ARRAY_INDEX(t1_snd[3*k], t1_snd[3*k+1], t1_snd[3*k+2], array);
+        real_t *rcv = &ARRAY_INDEX(t1_rcv[3*k], t1_rcv[3*k+1], t1_rcv[3*k+2], array);
+        MPI_Sendrecv(snd, 1, t1_types[k], t1_neighbours[k], 0, rcv, 1, t1_types[k], t1_neighbours[k], 0, cart_com, MPI_STATUS_IGNORE);
+    }
+
+    for ( int_t j=0; j<12; j++ ) {
+        real_t *snd = &ARRAY_INDEX(t2_snd[3*j], t2_snd[3*j+1], t2_snd[3*j+2], array);
+        real_t *rcv = &ARRAY_INDEX(t2_rcv[3*j], t2_rcv[3*j+1], t2_rcv[3*j+2], array);
+        if (t2_neighbours[j] > -1) MPI_Sendrecv(snd, 1, t2_types[j], t2_neighbours[j], 0, rcv, 1, t2_types[j], t2_neighbours[j], 0, cart_com, MPI_STATUS_IGNORE);
+    }
+
+    for ( int_t i=0; i<8; i++ ) {
+        real_t *snd = &ARRAY_INDEX(t3_snd[3*i], t3_snd[3*i+1], t3_snd[3*i+2], array);
+        real_t *rcv = &ARRAY_INDEX(t3_rcv[3*i], t3_rcv[3*i+1], t3_rcv[3*i+2], array);
+        if (t3_neighbours[i] > -1) MPI_Sendrecv(snd, 1, corner_grid, t3_neighbours[i], 0, rcv, 1, corner_grid, t3_neighbours[i], 0, cart_com, MPI_STATUS_IGNORE);
+    }
 }
 
 
@@ -1122,6 +1094,32 @@ mpi_types_destroy ( void )
     MPI_Type_free ( &x_edge_grid );
 
     MPI_Type_free ( &corner_grid );
+}
+
+void mpi_test_save (real_t *array) {
+    if (MPI_RANK_TEST) {
+        for ( int_t k=0; k<HNz; k++ ) {
+            char filename[50];
+            sprintf(filename, "receivers/3d_%ldborder_exchange.csv", k);
+            FILE *out = fopen ( filename, "w" );
+            fprintf( out, "Rank: %d, size: %d, slice: %ld\n", rank, size, k);
+            fprintf ( out, "%ld,%d,%ld\t", recv->n, HALO, Nt );
+            fprintf( out, "%ld,%ld,%ld\n", tNx, tNy, tNz);
+            for ( int_t j=1; j<=HNy; j++ ) {
+                    fprintf ( out, "\n" );
+                    for ( int_t i=0; i<HNx; i++ ){
+                        int num = (int)ARRAY_INDEX(k, HNy-j, i, array);  //mirrored y coordinate
+                        if (num != -1){
+                            fprintf ( out, "%d\t", num );
+                        } else {
+                            fprintf ( out, "-\t");
+                        }
+                    }
+            }
+            fprintf ( out, "\n" );
+            fclose ( out );
+        }
+    }
 }
 
 
