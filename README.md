@@ -54,6 +54,7 @@ Numbers are arranged in the following order T1->T2->T3
 ![Alt text](figures\neighbours\3d_annotated_numbered.png)
 Z, Y, X  (Nr)
 
+![Alt text](figures\neighbours\cubes.png)
 
 
 ## Commands list
